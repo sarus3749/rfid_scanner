@@ -19,7 +19,6 @@
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
 #include <EEPROM.h>
-#include <LittleFS.h>
 #include <webpage.h>
 
 
@@ -81,7 +80,6 @@ void startConfigAP();
 void loadScanDelay();
 void saveScanDelay(unsigned long val);
 void logApiSend(const String& uid, int httpCode);
-void listLittleFSFiles();
 
 void setup() {
     Serial.begin(115200);
@@ -110,8 +108,6 @@ void setup() {
     mfrc522.PCD_DumpVersionToSerial();
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
-    LittleFS.begin();
-    listLittleFSFiles();
     loadApiUrl();
     loadWifiConfig();
     loadScanDelay();
@@ -267,6 +263,7 @@ void handleRFIDOperations() {
             }
         }
         lastCardInfo = cardContent;
+        sendUidToApi(uid); // Ajouté : log et appel API
         readCard();
     } else if (mode == "WRITE") {
         lastCardInfo = cardContent + "(Mode écriture)";
@@ -971,24 +968,4 @@ void logApiSend(const String& uid, int httpCode) {
     apiLog[apiLogIndex].uid = uid;
     apiLog[apiLogIndex].httpCode = httpCode;
     apiLogIndex = (apiLogIndex + 1) % API_LOG_SIZE;
-}
-
-// Fonction pour lister les fichiers dans LittleFS
-void listLittleFSFiles() {
-    Serial.println("Contenu de LittleFS :");
-    File root = LittleFS.open("/", "r");
-    if (!root) {
-        Serial.println("  Erreur d'accès à LittleFS");
-        return;
-    }
-    File file = root.openNextFile();
-    while (file) {
-        Serial.print("  ");
-        Serial.print(file.name());
-        Serial.print("  [");
-        Serial.print(file.size());
-        Serial.println(" octets]");
-        file = root.openNextFile();
-    }
-    Serial.println("----------------------");
 }
