@@ -37,6 +37,12 @@ String apiUrl = "";
 String wifiSsid = "";
 String wifiPass = "";
 
+// === Paramètre délai entre scans RFID ===
+#define SCAN_DELAY_ADDR  (WIFI_PASS_ADDR + WIFI_PASS_MAXLEN) // placer après le WiFi
+#define SCAN_DELAY_SIZE  4
+unsigned long scanDelayMs = 3000; // 3 secondes par défaut
+unsigned long lastScanTime = 0;
+
 // === Prototypes des fonctions ===
 void setup();
 void loop();
@@ -60,6 +66,8 @@ void sendUidToApi(const String& uid);
 void loadWifiConfig();
 void saveWifiConfig(const String& ssid, const String& pass);
 void startConfigAP();
+void loadScanDelay();
+void saveScanDelay(unsigned long val);
 
 void setup() {
     Serial.begin(115200);
@@ -90,6 +98,7 @@ void setup() {
     digitalWrite(LED_PIN, LOW);
     loadApiUrl();
     loadWifiConfig();
+    loadScanDelay();
     if (!otaEnabled) {
         WiFi.mode(WIFI_OFF);
     } else {
@@ -175,6 +184,10 @@ void handleSerialCommands() {
 }
 
 void handleRFIDOperations() {
+    // Délai entre scans
+    if (millis() - lastScanTime < scanDelayMs) {
+        return;
+    }
     // Recherche de nouvelles cartes
     if (!mfrc522.PICC_IsNewCardPresent()) {
         return;
@@ -183,6 +196,7 @@ void handleRFIDOperations() {
     if (!mfrc522.PICC_ReadCardSerial()) {
         return;
     }
+    lastScanTime = millis();
     blinkLed();
     Serial.println("\n=== Carte détectée ===");
     // Affichage de l'UID
@@ -715,6 +729,12 @@ void setupWebServer() {
                 <input type='text' id='writeData' placeholder='Données à écrire'>
                 <button class='button' onclick='writeData()'>✏️ Écrire</button>
             </div>
+            <div class='info'>
+                <h3>⏱️ Délai entre scans RFID</h3>
+                <input type='number' id='scanDelay' min='500' step='100' style='width:120px'> ms <span style='color:#888'>(min 500 ms)</span>
+                <button class='button' onclick='saveScanDelay()'>💾 Enregistrer</button>
+                <span id='scanDelayStatus'></span>
+            </div>
         </div>
         <div class='tab-content' id='tab-config'>
             <div class='info'>
@@ -847,8 +867,29 @@ void setupWebServer() {
                 setTimeout(()=>{document.getElementById('wifiStatus').textContent='';}, 2000);
             });
         }
+        function loadScanDelay() {
+            fetch('/api/scandelay')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('scanDelay').value = data;
+                });
+        }
+        function saveScanDelay() {
+            const delay = document.getElementById('scanDelay').value;
+            fetch('/api/scandelay', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'delay=' + encodeURIComponent(delay)
+            })
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('scanDelayStatus').textContent = 'Délai enregistré!';
+                setTimeout(()=>{document.getElementById('scanDelayStatus').textContent='';}, 2000);
+            });
+        }
         loadApiUrl();
         loadWifiConfig();
+        loadScanDelay();
         setInterval(updateStatus, 5000);
         setInterval(updateCardInfo, 2000);
         updateStatus();
@@ -934,6 +975,22 @@ void setupWebServer() {
             webServer.send(200, "text/plain", "OK");
         } else {
             webServer.send(400, "text/plain", "Paramètres 'ssid' ou 'pass' manquants");
+        }
+    });
+    
+    // API pour le délai entre scans RFID
+    webServer.on("/api/scandelay", []() {
+        if (webServer.method() == HTTP_GET) {
+            webServer.send(200, "text/plain", String(scanDelayMs));
+        } else if (webServer.method() == HTTP_POST) {
+            if (webServer.hasArg("delay")) {
+                unsigned long val = webServer.arg("delay").toInt();
+                if (val < 500) val = 500;
+                saveScanDelay(val);
+                webServer.send(200, "text/plain", "OK");
+            } else {
+                webServer.send(400, "text/plain", "Paramètre 'delay' manquant");
+            }
         }
     });
     
@@ -1044,6 +1101,39 @@ void saveWifiConfig(const String& ssid, const String& pass) {
     EEPROM.end();
     wifiSsid = ssid;
     wifiPass = pass;
+}
+
+// Fonction pour charger le délai entre scans RFID depuis l'EEPROM
+void loadScanDelay() {
+    EEPROM.begin(EEPROM_SIZE);
+    unsigned long val = 0;
+    bool valid = true;
+    for (int i = 0; i < SCAN_DELAY_SIZE; i++) {
+        byte b = EEPROM.read(SCAN_DELAY_ADDR + i);
+        if (b == 0xFF) valid = false;
+        val |= ((unsigned long)b) << (8 * i);
+    }
+    if (!valid || val < 500) {
+        // Écrire la valeur par défaut 3000 ms en EEPROM
+        val = 3000;
+        for (int i = 0; i < SCAN_DELAY_SIZE; i++) {
+            EEPROM.write(SCAN_DELAY_ADDR + i, (val >> (8 * i)) & 0xFF);
+        }
+        EEPROM.commit();
+    }
+    EEPROM.end();
+    scanDelayMs = val;
+}
+
+// Fonction pour sauvegarder le délai entre scans RFID dans l'EEPROM
+void saveScanDelay(unsigned long val) {
+    EEPROM.begin(EEPROM_SIZE);
+    for (int i = 0; i < SCAN_DELAY_SIZE; i++) {
+        EEPROM.write(SCAN_DELAY_ADDR + i, (val >> (8 * i)) & 0xFF);
+    }
+    EEPROM.commit();
+    EEPROM.end();
+    scanDelayMs = val;
 }
 
 // Fonction pour faire clignoter la LED

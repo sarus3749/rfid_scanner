@@ -11,7 +11,7 @@
 // MISO = D6 (GPIO 12)
 // SCK  = D5 (GPIO 14)
 
-#define LED_PIN D4 // GPIO 2 (D4) pour la LED intégrée
+#define LED_PIN D2 // GPIO 4  (D2)
 
 #define EEPROM_SIZE 256
 #define API_URL_ADDR 0
