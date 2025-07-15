@@ -248,7 +248,7 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 .then(data => {
                     let html = '';
                     data.forEach(entry => {
-                        html += '[' + entry.t + 's] UID=' + entry.uid + '  HTTP=' + entry.code + '<br>';
+                        html += '[' + entry.t + 's] UID=' + entry.uid + '  HTTP=' + entry.code + '<br>URL: ' + entry.url + '<br>';
                     });
                     document.getElementById('apiTerminal').innerHTML = html || '<i>Aucun envoi enregistré</i>';
                 });

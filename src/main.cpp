@@ -51,6 +51,7 @@ struct ApiLogEntry {
     unsigned long timestamp;
     String uid;
     int httpCode;
+    String url; // Ajouté pour journaliser l'URL utilisée
 };
 ApiLogEntry apiLog[API_LOG_SIZE];
 int apiLogIndex = 0;
@@ -80,7 +81,7 @@ void saveWifiConfig(const String& ssid, const String& pass);
 void startConfigAP();
 void loadScanDelay();
 void saveScanDelay(unsigned long val);
-void logApiSend(const String& uid, int httpCode);
+void logApiSend(const String& uid, int httpCode, const String& url);
 
 void setup() {
     Serial.begin(115200);
@@ -767,7 +768,10 @@ void setupWebServer() {
             int idx = (apiLogIndex + i) % API_LOG_SIZE;
             if (apiLog[idx].uid.length() == 0) continue;
             if (count > 0) json += ",";
-            json += "{\"t\":" + String(apiLog[idx].timestamp) + ",\"uid\":\"" + apiLog[idx].uid + "\",\"code\":" + String(apiLog[idx].httpCode) + "}";
+            json += "{\"t\":" + String(apiLog[idx].timestamp)
+                + ",\"uid\":\"" + apiLog[idx].uid
+                + "\",\"code\":" + String(apiLog[idx].httpCode)
+                + ",\"url\":\"" + apiLog[idx].url + "\"}";
             count++;
         }
         json += "]";
@@ -945,24 +949,29 @@ void blinkLed(int times, int duration) {
 
 // Fonction pour envoyer l'UID à l'API
 void sendUidToApi(const String& uid) {
-    if (WiFi.status() == WL_CONNECTED && apiUrl.startsWith("http")) {
+    String url = apiUrl;
+    if (WiFi.status() == WL_CONNECTED && url.startsWith("http")) {
+        // S'assurer que l'URL se termine par /uid (sans double slash)
+        if (!url.endsWith("/uid")) {
+            if (url.endsWith("/")) url += "uid";
+            else url += "/uid";
+        }
         HTTPClient http;
         WiFiClient wifiClient;
-        String url = apiUrl;
-        if (!url.endsWith("/")) url += "/";
         http.begin(wifiClient, url);
         http.addHeader("Content-Type", "application/x-www-form-urlencoded");
         int httpCode = http.POST("uid=" + uid);
-        logApiSend(uid, httpCode);
+        logApiSend(uid, httpCode, url);
         http.end();
     } else {
-        logApiSend(uid, -1);
+        logApiSend(uid, -1, url);
     }
 }
 
-void logApiSend(const String& uid, int httpCode) {
+void logApiSend(const String& uid, int httpCode, const String& url) {
     apiLog[apiLogIndex].timestamp = millis() / 1000;
     apiLog[apiLogIndex].uid = uid;
     apiLog[apiLogIndex].httpCode = httpCode;
+    apiLog[apiLogIndex].url = url;
     apiLogIndex = (apiLogIndex + 1) % API_LOG_SIZE;
 }
