@@ -33,6 +33,7 @@ String dataToWrite = "";
 bool continuousMode = true;
 bool otaEnabled = true;
 bool wifiConnected = false;
+bool otaInProgress = false;
 String lastCardInfo = "Aucune carte";
 String apiUrl = "";
 String wifiSsid = "";
@@ -106,8 +107,10 @@ void setup() {
     Serial.println("- WIFI: Se connecter au WiFi");
     Serial.println("========================================");
     mfrc522.PCD_DumpVersionToSerial();
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);
     pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, LOW);
+    digitalWrite(LED_PIN, HIGH); // Éteint la LED (inversée sur ESP8266)
     loadApiUrl();
     loadWifiConfig();
     loadScanDelay();
@@ -126,6 +129,10 @@ void setup() {
 }
 
 void loop() {
+    if (otaInProgress) {
+        ArduinoOTA.handle();
+        return;
+    }
     // Gestion des commandes série
     if (Serial.available()) {
         handleSerialCommands();
@@ -231,53 +238,15 @@ void handleRFIDOperations() {
         if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&
             piccType != MFRC522::PICC_TYPE_MIFARE_1K &&
             piccType != MFRC522::PICC_TYPE_MIFARE_4K) {
-            cardContent += "<b>Type de carte non supporté pour la lecture mémoire (" + String(mfrc522.PICC_GetTypeName(piccType)) + ")</b><br/>";
+            cardContent += "<b>Type de carte non supporté pour la lecture mémoire (" + String(mfrc522.PICC_GetTypeName(piccType)) + ")</b>";
             lastCardInfo = cardContent;
             sendUidToApi(uid);
             return;
         }
-        // Lecture de plusieurs blocs (secteurs 1 à 15, blocs 0 à 2)
-        for (byte sector = 1; sector < 16; sector++) {
-            for (byte block = 0; block < 3; block++) { // Éviter le bloc trailer
-                byte blockAddr = sector * 4 + block;
-                byte buffer[18];
-                byte size = sizeof(buffer);
-                // Réinitialisation de la clé par défaut à chaque bloc
-                for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
-                MFRC522::StatusCode status = mfrc522.PCD_Authenticate(
-                    MFRC522::PICC_CMD_MF_AUTH_KEY_A,
-                    blockAddr,
-                    &key,
-                    &(mfrc522.uid)
-                );
-                if (status != MFRC522::STATUS_OK) {
-                    String errMsg = String(mfrc522.GetStatusCodeName(status));
-                    cardContent += "Secteur " + String(sector) + " Bloc " + String(block) + ": Auth échouée (" + errMsg + ")<br/>";
-                    continue;
-                }
-                status = mfrc522.MIFARE_Read(blockAddr, buffer, &size);
-                if (status != MFRC522::STATUS_OK) {
-                    String errMsg = String(mfrc522.GetStatusCodeName(status));
-                    cardContent += "Secteur " + String(sector) + " Bloc " + String(block) + ": Lecture échouée (" + errMsg + ")<br/>";
-                    continue;
-                }
-                cardContent += "Secteur " + String(sector) + " Bloc " + String(block) + ": ";
-                for (byte i = 0; i < 16; i++) {
-                    if (buffer[i] < 0x10) cardContent += " 0";
-                    else cardContent += " ";
-                    cardContent += String(buffer[i], HEX);
-                }
-                cardContent += " | ";
-                for (byte i = 0; i < 16; i++) {
-                    if (buffer[i] >= 32 && buffer[i] <= 126) cardContent += (char)buffer[i];
-                    else cardContent += ".";
-                }
-                cardContent += "<br/>";
-            }
-        }
+        // Affichage UID et type uniquement, plus de lecture de blocs
         lastCardInfo = cardContent;
         sendUidToApi(uid);
-        readCard();
+        // Plus d'appel à readCard()
     } else if (mode == "WRITE") {
         lastCardInfo = cardContent + "(Mode écriture)";
         writeCard();
@@ -589,6 +558,21 @@ void connectToWiFi() {
         Serial.print("Signal: ");
         Serial.print(WiFi.RSSI());
         Serial.println(" dBm");
+        // Attendre que le serveur web et mDNS soient prêts avant d'allumer la LED
+        delay(200); // Laisser le temps au WiFi
+        setupWebServer();
+        bool mdnsReady = false;
+        for (int i = 0; i < 10; i++) { // Attendre jusqu'à 2s max
+            if (MDNS.begin(HOSTNAME)) {
+                mdnsReady = true;
+                break;
+            }
+            delay(200);
+        }
+        if (mdnsReady) {
+            MDNS.addService("http", "tcp", 80);
+        }
+        digitalWrite(LED_PIN, LOW); // Allume la LED (inversée sur ESP8266)
     } else {
         Serial.println();
         Serial.println("Échec de connexion WiFi, démarrage AP config");
@@ -614,34 +598,27 @@ void setupOTA() {
         Serial.println("WiFi requis pour OTA. Utilisez la commande WIFI d'abord.");
         return;
     }
-    
     Serial.println("=== Configuration OTA ===");
-    
-    // Configuration du nom d'hôte
     ArduinoOTA.setHostname(HOSTNAME);
     ArduinoOTA.setPassword(OTA_PASSWORD);
-    
-    // Callbacks OTA
     ArduinoOTA.onStart([]() {
         String type;
         if (ArduinoOTA.getCommand() == U_FLASH) {
             type = "sketch";
-        } else { // U_SPIFFS
+        } else {
             type = "filesystem";
         }
         Serial.println("Début mise à jour " + type);
-        // Arrêter les opérations RFID pendant la mise à jour
         continuousMode = false;
+        otaInProgress = true;
     });
-    
     ArduinoOTA.onEnd([]() {
         Serial.println("\nMise à jour terminée");
+        otaInProgress = false;
     });
-    
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
         Serial.printf("Progression: %u%%\r", (progress / (total / 100)));
     });
-    
     ArduinoOTA.onError([](ota_error_t error) {
         Serial.printf("Erreur[%u]: ", error);
         if (error == OTA_AUTH_ERROR) {
@@ -658,7 +635,6 @@ void setupOTA() {
         // Reprendre les opérations RFID en cas d'erreur
         continuousMode = true;
     });
-    
     ArduinoOTA.begin();
     
     // Configuration mDNS
@@ -832,6 +808,23 @@ void setupWebServer() {
         }
     });
     
+    // API pour faire clignoter le buzzer
+    webServer.on("/api/buzzer", []() {
+        int times = 1;
+        int duration = 100;
+        if (webServer.hasArg("times")) times = webServer.arg("times").toInt();
+        if (webServer.hasArg("duration")) duration = webServer.arg("duration").toInt();
+        if (times < 1) times = 1;
+        if (duration < 10) duration = 10;
+        for (int i = 0; i < times; i++) {
+            digitalWrite(BUZZER_PIN, HIGH);
+            delay(duration);
+            digitalWrite(BUZZER_PIN, LOW);
+            delay(duration);
+        }
+        webServer.send(200, "text/plain", "Buzzer OK");
+    });
+    
     webServer.begin();
     started = true;
     Serial.print("Serveur web démarré sur IP: ");
@@ -943,9 +936,9 @@ void saveScanDelay(unsigned long val) {
 // Fonction pour faire clignoter la LED
 void blinkLed(int times, int duration) {
     for (int i = 0; i < times; i++) {
-        digitalWrite(LED_PIN, HIGH);
+        digitalWrite(BUZZER_PIN, HIGH);
         delay(duration);
-        digitalWrite(LED_PIN, LOW);
+        digitalWrite(BUZZER_PIN, LOW);
         delay(duration);
     }
 }

@@ -83,6 +83,19 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 <button class='button' onclick='saveWifiConfig()'>💾 Enregistrer WiFi</button>
                 <span id='wifiStatus'></span>
             </div>
+            <div class='info'>
+                <h3>🔊 Test du buzzer</h3>
+                <button class='button' onclick='buzzerTest()'>Tester le buzzer</button>
+                <label for='buzzerTimes'>Nombre de bips :</label>
+                <input type='number' id='buzzerTimes' value='1' min='1' max='10' style='width:40px;'>
+                <label for='buzzerDuration'>Durée (ms) :</label>
+                <input type='number' id='buzzerDuration' value='100' min='10' max='1000' style='width:60px;'>
+                <span id='buzzerResult'></span>
+            </div>
+            <div class='info'>
+                <h3>🔧 Actions système</h3>
+                <button class='button danger' onclick='restartESP()'>🔄 Redémarrer</button>
+            </div>
             <div class='upload-form'>
                 <h3>🔄 Mise à jour du firmware</h3>
                 <p><strong>⚠️ Attention:</strong> La mise à jour interrompra temporairement les opérations RFID.</p>
@@ -91,10 +104,6 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                     <br><br>
                     <input type='submit' value='📤 Téléverser' class='button'>
                 </form>
-            </div>
-            <div class='info'>
-                <h3>🔧 Actions système</h3>
-                <button class='button danger' onclick='restartESP()'>🔄 Redémarrer</button>
             </div>
         </div>
         <div class='tab-content' id='tab-apilog'>
@@ -133,13 +142,23 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 alert('Veuillez entrer des données à écrire');
             }
         }
+        function formatUptime(seconds) {
+            const d = Math.floor(seconds / 86400);
+            const h = Math.floor((seconds % 86400) / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            let str = '';
+            if (d > 0) str += d + 'j ';
+            str += h + 'h ' + m + 'm ' + s + 's';
+            return str;
+        }
         function updateStatus() {
             fetch('/api/status')
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('mode').textContent = data.mode;
                     document.getElementById('memory').textContent = data.memory + ' bytes';
-                    document.getElementById('uptime').textContent = data.uptime + ' secondes';
+                    document.getElementById('uptime').textContent = formatUptime(data.uptime);
                     document.getElementById('rssi').textContent = data.rssi + ' dBm';
                 });
         }
@@ -233,6 +252,14 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                     });
                     document.getElementById('apiTerminal').innerHTML = html || '<i>Aucun envoi enregistré</i>';
                 });
+        }
+        function buzzerTest() {
+            const times = document.getElementById('buzzerTimes').value;
+            const duration = document.getElementById('buzzerDuration').value;
+            fetch(`/api/buzzer?times=${times}&duration=${duration}`)
+                .then(r => r.text())
+                .then(txt => document.getElementById('buzzerResult').textContent = txt)
+                .catch(() => document.getElementById('buzzerResult').textContent = 'Erreur');
         }
         loadApiUrl();
         loadWifiConfig();
