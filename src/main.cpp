@@ -17,14 +17,9 @@
 #include <ESP8266mDNS.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+#include <ESP8266HTTPClient.h>
+#include <EEPROM.h>
 
-// Configuration des broches pour D1 Mini ESP8266
-#define RST_PIN         D3    // GPIO 0  (D3)
-#define SS_PIN          D8    // GPIO 15 (D8)
-// SPI utilise les broches par défaut:
-// MOSI = D7 (GPIO 13)
-// MISO = D6 (GPIO 12)
-// SCK  = D5 (GPIO 14)
 
 // Création des instances
 MFRC522 mfrc522(SS_PIN, RST_PIN);
@@ -38,6 +33,9 @@ bool continuousMode = true;
 bool otaEnabled = true;
 bool wifiConnected = false;
 String lastCardInfo = "Aucune carte";
+String apiUrl = "";
+String wifiSsid = "";
+String wifiPass = "";
 
 // === Prototypes des fonctions ===
 void setup();
@@ -55,22 +53,25 @@ void testRFIDModule();
 void connectToWiFi();
 void setupOTA();
 void setupWebServer();
+void loadApiUrl();
+void saveApiUrl(const String& url);
+void blinkLed(int times = 2, int duration = 100);
+void sendUidToApi(const String& uid);
+void loadWifiConfig();
+void saveWifiConfig(const String& ssid, const String& pass);
+void startConfigAP();
 
 void setup() {
     Serial.begin(115200);
     while (!Serial);
-    
     // Initialisation SPI
     SPI.begin();
-    
     // Initialisation du module RFID
     mfrc522.PCD_Init();
-    
     // Préparation de la clé par défaut
     for (byte i = 0; i < 6; i++) {
         key.keyByte[i] = 0xFF;
     }
-    
     Serial.println("=== ESP8266 D1 Mini RFID Reader/Writer ===");
     Serial.println("Module RC522 initialisé");
     Serial.println("Commandes disponibles:");
@@ -84,21 +85,23 @@ void setup() {
     Serial.println("- OTA: Activer les mises à jour OTA");
     Serial.println("- WIFI: Se connecter au WiFi");
     Serial.println("========================================");
-    
-    // Vérification du module
     mfrc522.PCD_DumpVersionToSerial();
-    
-    // Désactiver le WiFi par défaut pour économiser l'énergie
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+    loadApiUrl();
+    loadWifiConfig();
     if (!otaEnabled) {
         WiFi.mode(WIFI_OFF);
+    } else {
+        if (wifiSsid.length() == 0 || wifiPass.length() == 0) {
+            startConfigAP();
+        } else {
+            connectToWiFi();
+            if (wifiConnected) {
+                setupOTA();
+            }
+        }
     }
-	else
-	{
-		while (!wifiConnected) {
-        connectToWiFi();
-		setupOTA();
-    	}
-	}
 }
 
 void loop() {
@@ -115,10 +118,10 @@ void loop() {
     // Gestion OTA si activé
     if (otaEnabled && wifiConnected) {
         ArduinoOTA.handle();
-        webServer.handleClient();
         MDNS.update();
     }
-    
+    // Toujours gérer le serveur web, même en AP
+    webServer.handleClient();
     delay(100);
 }
 
@@ -180,6 +183,7 @@ void handleRFIDOperations() {
     if (!mfrc522.PICC_ReadCardSerial()) {
         return;
     }
+    blinkLed();
     Serial.println("\n=== Carte détectée ===");
     // Affichage de l'UID
     Serial.print("UID: ");
@@ -528,20 +532,23 @@ void testRFIDModule() {
 
 // Fonction de connexion WiFi
 void connectToWiFi() {
+    loadWifiConfig();
+    if (wifiSsid.length() == 0 || wifiPass.length() == 0) {
+        startConfigAP();
+        return;
+    }
     Serial.println("=== Connexion WiFi ===");
     Serial.print("Connexion à ");
-    Serial.println(WIFI_SSID);
-    
+    Serial.println(wifiSsid);
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    
+    WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - start) < 20000) {
         delay(500);
         Serial.print(".");
         attempts++;
     }
-    
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
         Serial.println();
@@ -553,12 +560,21 @@ void connectToWiFi() {
         Serial.println(" dBm");
     } else {
         Serial.println();
-        Serial.println("Échec de connexion WiFi");
-        WiFi.mode(WIFI_OFF);
+        Serial.println("Échec de connexion WiFi, démarrage AP config");
         wifiConnected = false;
+        startConfigAP();
     }
-    
     Serial.println("=====================");
+}
+
+void startConfigAP() {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    Serial.print("AP de configuration démarré. SSID: ");
+    Serial.println(AP_SSID);
+    Serial.print("IP: ");
+    Serial.println(WiFi.softAPIP());
+    setupWebServer(); // Démarre le serveur web en mode AP
 }
 
 // Configuration OTA
@@ -571,7 +587,7 @@ void setupOTA() {
     Serial.println("=== Configuration OTA ===");
     
     // Configuration du nom d'hôte
-    ArduinoOTA.setHostname("ESP8266-RFID");
+    ArduinoOTA.setHostname(HOSTNAME);
     ArduinoOTA.setPassword(OTA_PASSWORD);
     
     // Callbacks OTA
@@ -615,7 +631,7 @@ void setupOTA() {
     ArduinoOTA.begin();
     
     // Configuration mDNS
-    if (MDNS.begin("esp8266-rfid")) {
+    if (MDNS.begin(HOSTNAME)) {
         Serial.println("mDNS démarré");
         MDNS.addService("http", "tcp", 80);
     }
@@ -626,7 +642,7 @@ void setupOTA() {
     otaEnabled = true;
     
     Serial.println("OTA activé!");
-    Serial.println("Nom d'hôte: ESP8266-RFID");
+    Serial.println("Nom d'hôte: " + String(HOSTNAME));
     Serial.print("IP: ");
     Serial.println(WiFi.localIP());
     Serial.println("Interface web: http://" + WiFi.localIP().toString());
@@ -635,76 +651,111 @@ void setupOTA() {
 
 // Configuration du serveur web pour interface OTA
 void setupWebServer() {
+    static bool started = false;
+    if (started) return;
     // Page principale
     webServer.on("/", []() {
         String html = R"(
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ESP8266 RFID - Interface OTA</title>
+    <title>RFID Scanner</title>
     <meta charset='utf-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1'>
     <style>
         body { font-family: Arial; margin: 20px; background: #f0f0f0; }
-        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 840px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .header { text-align: center; color: #333; margin-bottom: 30px; }
+        .tabs { display: flex; border-bottom: 2px solid #e0e0e0; margin-bottom: 20px; }
+        .tab { padding: 12px 32px; cursor: pointer; background: #f7f7f7; border: none; outline: none; font-size: 18px; color: #333; border-radius: 10px 10px 0 0; margin-right: 2px; }
+        .tab.active { background: #fff; border-bottom: 2px solid #fff; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
         .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 15px 0; }
         .button { padding: 12px 24px; margin: 8px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
         .button:hover { background: #45a049; }
         .button.danger { background: #f44336; }
         .button.danger:hover { background: #da190b; }
         .info { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0; }
-        input[type=text] { padding: 10px; width: 200px; border: 1px solid #ddd; border-radius: 4px; }
+        input[type=text], input[type=password] { padding: 10px; width: 220px; border: 1px solid #ddd; border-radius: 4px; }
         .upload-form { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; }
+        @media (max-width: 900px) { .container { max-width: 98vw; } }
     </style>
 </head>
 <body>
     <div class='container'>
         <div class='header'>
-            <h1>🔧 ESP8266 RFID Reader/Writer</h1>
-            <h2>Interface de Mise à Jour OTA</h2>
+            <h1>🔧 RFID Scanner</h1>
         </div>
-        
-        <div class='status'>
-            <h3>📊 État du système</h3>
-            <p><strong>Mode:</strong> <span id='mode'>Chargement...</span></p>
-            <p><strong>Mémoire libre:</strong> <span id='memory'>Chargement...</span></p>
-            <p><strong>Uptime:</strong> <span id='uptime'>Chargement...</span></p>
-            <p><strong>Signal WiFi:</strong> <span id='rssi'>Chargement...</span></p>
+        <div class='tabs'>
+            <button class='tab active' onclick='showTab(0)'>État</button>
+            <button class='tab' onclick='showTab(1)'>RFID</button>
+            <button class='tab' onclick='showTab(2)'>Configuration</button>
         </div>
-        
-        <div class='info'>
-            <h3>🎛️ Commandes RFID</h3>
-            <button class='button' onclick='sendCommand("READ")'>📖 Mode Lecture</button>
-            <button class='button' onclick='sendCommand("STOP")'>⏹️ Arrêter</button>
-            <button class='button' onclick='sendCommand("INFO")'>ℹ️ Informations</button>
-            <br><br>
-            <input type='text' id='writeData' placeholder='Données à écrire'>
-            <button class='button' onclick='writeData()'>✏️ Écrire</button>
+        <div class='tab-content active' id='tab-etat'>
+            <div class='status'>
+                <h3>📊 État du système</h3>
+                <p><strong>Mode:</strong> <span id='mode'>Chargement...</span></p>
+                <p><strong>Mémoire libre:</strong> <span id='memory'>Chargement...</span></p>
+                <p><strong>Uptime:</strong> <span id='uptime'>Chargement...</span></p>
+                <p><strong>Signal WiFi:</strong> <span id='rssi'>Chargement...</span></p>
+            </div>
+            <div id='cardInfo' class='status' style='display:none'>
+                <h3>💳 Dernière carte détectée</h3>
+                <p id='cardDetails'>Aucune carte</p>
+            </div>
         </div>
-        
-        <div class='upload-form'>
-            <h3>🔄 Mise à jour du firmware</h3>
-            <p><strong>⚠️ Attention:</strong> La mise à jour interrompra temporairement les opérations RFID.</p>
-            <form method='POST' action='/update' enctype='multipart/form-data'>
-                <input type='file' name='update' accept='.bin'>
+        <div class='tab-content' id='tab-rfid'>
+            <div class='info'>
+                <h3>🎛️ Commandes RFID</h3>
+                <button class='button' onclick='sendCommand("READ")'>📖 Mode Lecture</button>
+                <button class='button' onclick='sendCommand("STOP")'>⏹️ Arrêter</button>
+                <button class='button' onclick='sendCommand("INFO")'>ℹ️ Informations</button>
                 <br><br>
-                <input type='submit' value='📤 Téléverser' class='button'>
-            </form>
+                <input type='text' id='writeData' placeholder='Données à écrire'>
+                <button class='button' onclick='writeData()'>✏️ Écrire</button>
+            </div>
         </div>
-        
-        <div class='info'>
-            <h3>🔧 Actions système</h3>
-            <button class='button danger' onclick='restartESP()'>🔄 Redémarrer</button>
-        </div>
-        
-        <div id='cardInfo' class='status' style='display:none'>
-            <h3>💳 Dernière carte détectée</h3>
-            <p id='cardDetails'>Aucune carte</p>
+        <div class='tab-content' id='tab-config'>
+            <div class='info'>
+                <h3>🌐 Configuration API</h3>
+                <input type='text' id='apiUrl' placeholder='URL API' style='width:350px'>
+                <button class='button' onclick='saveApiUrl()'>💾 Enregistrer URL</button>
+                <span id='apiUrlStatus'></span>
+            </div>
+            <div class='info'>
+                <h3>🔑 Configuration WiFi</h3>
+                <input type='text' id='wifiSsid' placeholder='SSID' style='width:180px'>
+                <input type='password' id='wifiPass' placeholder='Mot de passe' style='width:180px'>
+                <button class='button' onclick='saveWifiConfig()'>💾 Enregistrer WiFi</button>
+                <span id='wifiStatus'></span>
+            </div>
+            <div class='upload-form'>
+                <h3>🔄 Mise à jour du firmware</h3>
+                <p><strong>⚠️ Attention:</strong> La mise à jour interrompra temporairement les opérations RFID.</p>
+                <form method='POST' action='/update' enctype='multipart/form-data'>
+                    <input type='file' name='update' accept='.bin'>
+                    <br><br>
+                    <input type='submit' value='📤 Téléverser' class='button'>
+                </form>
+            </div>
+            <div class='info'>
+                <h3>🔧 Actions système</h3>
+                <button class='button danger' onclick='restartESP()'>🔄 Redémarrer</button>
+            </div>
         </div>
     </div>
-    
     <script>
+        function showTab(idx) {
+            var tabs = document.getElementsByClassName('tab');
+            var contents = document.getElementsByClassName('tab-content');
+            for (var i = 0; i < tabs.length; i++) {
+                tabs[i].classList.remove('active');
+                contents[i].classList.remove('active');
+            }
+            tabs[idx].classList.add('active');
+            contents[idx].classList.add('active');
+        }
         function sendCommand(cmd) {
             fetch('/api/command?cmd=' + cmd)
                 .then(response => response.text())
@@ -713,7 +764,6 @@ void setupWebServer() {
                     updateStatus();
                 });
         }
-        
         function writeData() {
             const data = document.getElementById('writeData').value;
             if (data) {
@@ -727,7 +777,6 @@ void setupWebServer() {
                 alert('Veuillez entrer des données à écrire');
             }
         }
-        
         function updateStatus() {
             fetch('/api/status')
                 .then(response => response.json())
@@ -738,7 +787,6 @@ void setupWebServer() {
                     document.getElementById('rssi').textContent = data.rssi + ' dBm';
                 });
         }
-        
         function updateCardInfo() {
             fetch('/api/lastcard')
                 .then(response => response.text())
@@ -747,23 +795,64 @@ void setupWebServer() {
                     document.getElementById('cardInfo').style.display = (data && data !== 'Aucune carte') ? '' : 'none';
                 });
         }
-        
         function restartESP() {
-    if(confirm("Redémarrer l'ESP8266?")) {
-        fetch('/restart')
+            if(confirm("Redémarrer l'ESP8266?")) {
+                fetch('/restart')
+                    .then(response => response.text())
+                    .then(data => {
+                        alert('Redémarrage en cours...');
+                        setTimeout(function(){ location.reload(); }, 12000);
+                    });
+            }
+        }
+        function loadApiUrl() {
+            fetch('/api/apiurl')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('apiUrl').value = data;
+                });
+        }
+        function saveApiUrl() {
+            const url = document.getElementById('apiUrl').value;
+            fetch('/api/setapiurl', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'url=' + encodeURIComponent(url)
+            })
             .then(response => response.text())
             .then(data => {
-                alert('Redémarrage en cours...');
-                setTimeout(function(){ location.reload(); }, 12000);
+                document.getElementById('apiUrlStatus').textContent = 'URL enregistrée!';
+                setTimeout(()=>{document.getElementById('apiUrlStatus').textContent='';}, 2000);
             });
-    }
-}
-        
-        // Mise à jour automatique du statut toutes les 5 secondes
+        }
+        function loadWifiConfig() {
+            fetch('/api/wificonfig')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('wifiSsid').value = data.ssid;
+                    document.getElementById('wifiPass').value = data.pass;
+                });
+        }
+        function saveWifiConfig() {
+            const ssid = document.getElementById('wifiSsid').value;
+            const pass = document.getElementById('wifiPass').value;
+            fetch('/api/setwificonfig', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'ssid=' + encodeURIComponent(ssid) + '&pass=' + encodeURIComponent(pass)
+            })
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('wifiStatus').textContent = 'WiFi enregistré!';
+                setTimeout(()=>{document.getElementById('wifiStatus').textContent='';}, 2000);
+            });
+        }
+        loadApiUrl();
+        loadWifiConfig();
         setInterval(updateStatus, 5000);
         setInterval(updateCardInfo, 2000);
-        updateStatus(); // Première mise à jour
-        updateCardInfo(); // Première mise à jour des infos carte
+        updateStatus();
+        updateCardInfo();
     </script>
 </body>
 </html>
@@ -819,6 +908,35 @@ void setupWebServer() {
         webServer.send(200, "text/plain", lastCardInfo);
     });
     
+    // API pour l'URL de l'API
+    webServer.on("/api/apiurl", []() {
+        webServer.send(200, "text/plain", apiUrl);
+    });
+    webServer.on("/api/setapiurl", []() {
+        if (webServer.hasArg("url")) {
+            saveApiUrl(webServer.arg("url"));
+            webServer.send(200, "text/plain", "OK");
+        } else {
+            webServer.send(400, "text/plain", "Paramètre 'url' manquant");
+        }
+    });
+    
+    // API pour la config WiFi
+    webServer.on("/api/wificonfig", []() {
+        String json = "{";
+        json += "\"ssid\":\"" + wifiSsid + "\",";
+        json += "\"pass\":\"" + wifiPass + "\"}";
+        webServer.send(200, "application/json", json);
+    });
+    webServer.on("/api/setwificonfig", []() {
+        if (webServer.hasArg("ssid") && webServer.hasArg("pass")) {
+            saveWifiConfig(webServer.arg("ssid"), webServer.arg("pass"));
+            webServer.send(200, "text/plain", "OK");
+        } else {
+            webServer.send(400, "text/plain", "Paramètres 'ssid' ou 'pass' manquants");
+        }
+    });
+    
     // Redémarrage
     webServer.on("/restart", []() {
         webServer.send(200, "text/html", "<h1>Redémarrage en cours...</h1><script>setTimeout(function(){location.href='/';}, 10000);</script>");
@@ -854,5 +972,100 @@ void setupWebServer() {
     });
     
     webServer.begin();
-    Serial.println("Serveur web démarré");
+    started = true;
+    Serial.print("Serveur web démarré sur IP: ");
+    Serial.println(WiFi.softAPIP());
+}
+
+// Fonction pour charger l'URL de l'API depuis l'EEPROM
+void loadApiUrl() {
+    EEPROM.begin(EEPROM_SIZE);
+    char buf[API_URL_MAXLEN+1];
+    for (int i = 0; i < API_URL_MAXLEN; i++) {
+        buf[i] = EEPROM.read(API_URL_ADDR + i);
+        if (buf[i] == '\0') break;
+    }
+    buf[API_URL_MAXLEN] = '\0';
+    apiUrl = String(buf);
+    EEPROM.end();
+    if (apiUrl.length() == 0) apiUrl = "http://";
+}
+
+// Fonction pour sauvegarder l'URL de l'API dans l'EEPROM
+void saveApiUrl(const String& url) {
+    EEPROM.begin(EEPROM_SIZE);
+    for (int i = 0; i < API_URL_MAXLEN; i++) {
+        if (i < url.length()) EEPROM.write(API_URL_ADDR + i, url[i]);
+        else EEPROM.write(API_URL_ADDR + i, 0);
+    }
+    EEPROM.commit();
+    EEPROM.end();
+    apiUrl = url;
+}
+
+void loadWifiConfig() {
+    EEPROM.begin(EEPROM_SIZE);
+    char ssid[WIFI_SSID_MAXLEN+1] = {0};
+    char pass[WIFI_PASS_MAXLEN+1] = {0};
+    bool ssidValid = false;
+    bool passValid = false;
+    for (int i = 0; i < WIFI_SSID_MAXLEN; i++) {
+        byte b = EEPROM.read(WIFI_SSID_ADDR + i);
+        if (b == 0xFF || b == 0) break;
+        ssid[i] = b;
+        ssidValid = true;
+    }
+    ssid[WIFI_SSID_MAXLEN] = '\0';
+    for (int i = 0; i < WIFI_PASS_MAXLEN; i++) {
+        byte b = EEPROM.read(WIFI_PASS_ADDR + i);
+        if (b == 0xFF || b == 0) break;
+        pass[i] = b;
+        passValid = true;
+    }
+    pass[WIFI_PASS_MAXLEN] = '\0';
+    wifiSsid = ssidValid ? String(ssid) : "";
+    wifiPass = passValid ? String(pass) : "";
+    wifiSsid.trim();
+    wifiPass.trim();
+    EEPROM.end();
+}
+
+void saveWifiConfig(const String& ssid, const String& pass) {
+    EEPROM.begin(EEPROM_SIZE);
+    for (int i = 0; i < WIFI_SSID_MAXLEN; i++) {
+        if (i < ssid.length()) EEPROM.write(WIFI_SSID_ADDR + i, ssid[i]);
+        else EEPROM.write(WIFI_SSID_ADDR + i, 0);
+    }
+    for (int i = 0; i < WIFI_PASS_MAXLEN; i++) {
+        if (i < pass.length()) EEPROM.write(WIFI_PASS_ADDR + i, pass[i]);
+        else EEPROM.write(WIFI_PASS_ADDR + i, 0);
+    }
+    EEPROM.commit();
+    EEPROM.end();
+    wifiSsid = ssid;
+    wifiPass = pass;
+}
+
+// Fonction pour faire clignoter la LED
+void blinkLed(int times, int duration) {
+    for (int i = 0; i < times; i++) {
+        digitalWrite(LED_PIN, HIGH);
+        delay(duration);
+        digitalWrite(LED_PIN, LOW);
+        delay(duration);
+    }
+}
+
+// Fonction pour envoyer l'UID à l'API
+void sendUidToApi(const String& uid) {
+    if (WiFi.status() == WL_CONNECTED && apiUrl.startsWith("http")) {
+        HTTPClient http;
+        WiFiClient wifiClient;
+        String url = apiUrl;
+        if (!url.endsWith("/")) url += "/";
+        url += "?uid=" + uid;
+        http.begin(wifiClient, url);
+        int httpCode = http.GET();
+        http.end();
+    }
 }
