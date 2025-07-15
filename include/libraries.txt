@@ -1,0 +1,133 @@
+Bibliothèques requises pour le projet ESP8266 D1 Mini RFID:
+
+=== BIBLIOTHÈQUES PRINCIPALES ===
+
+1. MFRC522 Library
+   - Auteur: GithubCommunity
+   - Version: 1.4.11 ou plus récente
+   - Installation: Gestionnaire de bibliothèques Arduino
+   - Recherche: "MFRC522"
+   - Description: Gestion du module RC522 RFID
+
+2. ESP8266WiFi Library
+   - Incluse avec ESP8266 Arduino Core
+   - Gestion du WiFi (désactivé dans ce programme pour économiser l'énergie)
+   
+3. ArduinoOTA Library
+   - Incluse avec ESP8266 Arduino Core
+   - Gestion des mises à jour Over-The-Air
+
+4. ESP8266WebServer Library
+   - Incluse avec ESP8266 Arduino Core
+   - Serveur web pour interface OTA
+
+5. ESP8266mDNS Library
+   - Incluse avec ESP8266 Arduino Core
+   - Découverte réseau mDNS
+
+6. SPI Library
+   - Incluse avec Arduino IDE
+   - Gestion de la communication SPI
+
+=== INSTALLATION ÉTAPE PAR ÉTAPE ===
+
+Configuration ESP8266 dans Arduino IDE:
+1. Fichier → Préférences
+2. URLs de gestionnaire de cartes supplémentaires:
+   http://arduino.esp8266.com/stable/package_esp8266com_index.json
+3. Outils → Type de carte → Gestionnaire de cartes
+4. Rechercher "ESP8266" et installer "ESP8266 by ESP8266 Community"
+5. Sélectionner "LOLIN(WEMOS) D1 R2 & mini" comme carte
+
+Installation des bibliothèques:
+1. Outils → Gérer les bibliothèques
+2. Rechercher "MFRC522"
+3. Installer la bibliothèque MFRC522 par GithubCommunity
+4. Redémarrer l'IDE Arduino
+
+=== CONFIGURATION DE LA CARTE ===
+
+Paramètres recommandés pour D1 Mini:
+- Carte: LOLIN(WEMOS) D1 R2 & mini
+- CPU Frequency: 80 MHz
+- Flash Size: 4MB (FS:2MB OTA:~1019KB)
+- Upload Speed: 921600
+- Debug port: Disabled
+- Debug Level: None
+- Reset Method: nodemcu
+- Crystal Frequency: 26 MHz
+- VTables: Flash
+- Exceptions: Legacy (new can return nullptr)
+- Erase Flash: Only Sketch
+- SSL Support: All SSL ciphers (most compatible)
+
+=== VERSIONS TESTÉES ===
+
+- Arduino IDE: 1.8.19 ou 2.x
+- ESP8266 Core: 3.0.2 ou plus récent
+- MFRC522: 1.4.11
+- Plateforme: Windows/Linux/macOS
+
+=== DÉPENDANCES SYSTÈME ===
+
+Pilotes USB (si nécessaire):
+- CH340/CH341 pour certains clones D1 Mini
+- CP2102 pour les cartes officielles Wemos
+
+=== BIBLIOTHÈQUES OPTIONNELLES ===
+
+Pour extensions futures:
+1. ArduinoJson (pour sérialisation de données)
+2. ESP8266WebServer (pour interface web)
+3. ESP8266mDNS (pour découverte réseau)
+4. LittleFS (pour stockage de fichiers)
+5. NTPClient (pour horodatage)
+
+Installation des bibliothèques optionnelles:
+- Outils → Gérer les bibliothèques
+- Rechercher le nom de la bibliothèque
+- Installer la version la plus récente
+
+=== VÉRIFICATION DE L'INSTALLATION ===
+
+Code de test minimal:
+```cpp
+#include <ESP8266WiFi.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Test des bibliothèques ESP8266 RFID");
+  Serial.println("Toutes les bibliothèques sont correctement installées!");
+}
+
+void loop() {
+  // Test réussi si le code compile sans erreur
+}
+```
+
+=== RÉSOLUTION DE PROBLÈMES ===
+
+Erreurs courantes et solutions:
+
+1. "ESP8266WiFi.h: No such file or directory"
+   → Installer le package ESP8266 via le gestionnaire de cartes
+
+2. "MFRC522.h: No such file or directory"
+   → Installer la bibliothèque MFRC522 via le gestionnaire de bibliothèques
+
+3. "Compilation error for board LOLIN(WEMOS) D1 R2 & mini"
+   → Vérifier la sélection de la carte et la configuration
+
+4. "Upload failed"
+   → Vérifier le port série et la vitesse de téléversement
+   → Installer les pilotes USB appropriés
+
+=== MISE À JOUR ===
+
+Pour maintenir les bibliothèques à jour:
+1. Outils → Gérer les bibliothèques
+2. Filtrer par "Installées"
+3. Mettre à jour les bibliothèques avec des versions plus récentes
+4. Redémarrer l'IDE après les mises à jour
