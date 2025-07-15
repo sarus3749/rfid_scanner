@@ -19,6 +19,8 @@
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
 #include <EEPROM.h>
+#include <LittleFS.h>
+#include <webpage.h>
 
 
 // Création des instances
@@ -42,6 +44,16 @@ String wifiPass = "";
 #define SCAN_DELAY_SIZE  4
 unsigned long scanDelayMs = 3000; // 3 secondes par défaut
 unsigned long lastScanTime = 0;
+
+// === Historique des envois à l'API ===
+#define API_LOG_SIZE 32
+struct ApiLogEntry {
+    unsigned long timestamp;
+    String uid;
+    int httpCode;
+};
+ApiLogEntry apiLog[API_LOG_SIZE];
+int apiLogIndex = 0;
 
 // === Prototypes des fonctions ===
 void setup();
@@ -68,6 +80,8 @@ void saveWifiConfig(const String& ssid, const String& pass);
 void startConfigAP();
 void loadScanDelay();
 void saveScanDelay(unsigned long val);
+void logApiSend(const String& uid, int httpCode);
+void listLittleFSFiles();
 
 void setup() {
     Serial.begin(115200);
@@ -96,6 +110,8 @@ void setup() {
     mfrc522.PCD_DumpVersionToSerial();
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
+    LittleFS.begin();
+    listLittleFSFiles();
     loadApiUrl();
     loadWifiConfig();
     loadScanDelay();
@@ -668,237 +684,8 @@ void setupWebServer() {
     static bool started = false;
     if (started) return;
     // Page principale
-    webServer.on("/", []() {
-        String html = R"(
-<!DOCTYPE html>
-<html>
-<head>
-    <title>RFID Scanner</title>
-    <meta charset='utf-8'>
-    <meta name='viewport' content='width=device-width, initial-scale=1'>
-    <style>
-        body { font-family: Arial; margin: 20px; background: #f0f0f0; }
-        .container { max-width: 840px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .header { text-align: center; color: #333; margin-bottom: 30px; }
-        .tabs { display: flex; border-bottom: 2px solid #e0e0e0; margin-bottom: 20px; }
-        .tab { padding: 12px 32px; cursor: pointer; background: #f7f7f7; border: none; outline: none; font-size: 18px; color: #333; border-radius: 10px 10px 0 0; margin-right: 2px; }
-        .tab.active { background: #fff; border-bottom: 2px solid #fff; font-weight: bold; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
-        .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 15px 0; }
-        .button { padding: 12px 24px; margin: 8px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
-        .button:hover { background: #45a049; }
-        .button.danger { background: #f44336; }
-        .button.danger:hover { background: #da190b; }
-        .info { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0; }
-        input[type=text], input[type=password] { padding: 10px; width: 220px; border: 1px solid #ddd; border-radius: 4px; }
-        .upload-form { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; }
-        @media (max-width: 900px) { .container { max-width: 98vw; } }
-    </style>
-</head>
-<body>
-    <div class='container'>
-        <div class='header'>
-            <h1>🔧 RFID Scanner</h1>
-        </div>
-        <div class='tabs'>
-            <button class='tab active' onclick='showTab(0)'>État</button>
-            <button class='tab' onclick='showTab(1)'>RFID</button>
-            <button class='tab' onclick='showTab(2)'>Configuration</button>
-        </div>
-        <div class='tab-content active' id='tab-etat'>
-            <div class='status'>
-                <h3>📊 État du système</h3>
-                <p><strong>Mode:</strong> <span id='mode'>Chargement...</span></p>
-                <p><strong>Mémoire libre:</strong> <span id='memory'>Chargement...</span></p>
-                <p><strong>Uptime:</strong> <span id='uptime'>Chargement...</span></p>
-                <p><strong>Signal WiFi:</strong> <span id='rssi'>Chargement...</span></p>
-            </div>
-            <div id='cardInfo' class='status' style='display:none'>
-                <h3>💳 Dernière carte détectée</h3>
-                <p id='cardDetails'>Aucune carte</p>
-            </div>
-        </div>
-        <div class='tab-content' id='tab-rfid'>
-            <div class='info'>
-                <h3>🎛️ Commandes RFID</h3>
-                <button class='button' onclick='sendCommand("READ")'>📖 Mode Lecture</button>
-                <button class='button' onclick='sendCommand("STOP")'>⏹️ Arrêter</button>
-                <button class='button' onclick='sendCommand("INFO")'>ℹ️ Informations</button>
-                <br><br>
-                <input type='text' id='writeData' placeholder='Données à écrire'>
-                <button class='button' onclick='writeData()'>✏️ Écrire</button>
-            </div>
-            <div class='info'>
-                <h3>⏱️ Délai entre scans RFID</h3>
-                <input type='number' id='scanDelay' min='500' step='100' style='width:120px'> ms <span style='color:#888'>(min 500 ms)</span>
-                <button class='button' onclick='saveScanDelay()'>💾 Enregistrer</button>
-                <span id='scanDelayStatus'></span>
-            </div>
-        </div>
-        <div class='tab-content' id='tab-config'>
-            <div class='info'>
-                <h3>🌐 Configuration API</h3>
-                <input type='text' id='apiUrl' placeholder='URL API' style='width:350px'>
-                <button class='button' onclick='saveApiUrl()'>💾 Enregistrer URL</button>
-                <span id='apiUrlStatus'></span>
-            </div>
-            <div class='info'>
-                <h3>🔑 Configuration WiFi</h3>
-                <input type='text' id='wifiSsid' placeholder='SSID' style='width:180px'>
-                <input type='password' id='wifiPass' placeholder='Mot de passe' style='width:180px'>
-                <button class='button' onclick='saveWifiConfig()'>💾 Enregistrer WiFi</button>
-                <span id='wifiStatus'></span>
-            </div>
-            <div class='upload-form'>
-                <h3>🔄 Mise à jour du firmware</h3>
-                <p><strong>⚠️ Attention:</strong> La mise à jour interrompra temporairement les opérations RFID.</p>
-                <form method='POST' action='/update' enctype='multipart/form-data'>
-                    <input type='file' name='update' accept='.bin'>
-                    <br><br>
-                    <input type='submit' value='📤 Téléverser' class='button'>
-                </form>
-            </div>
-            <div class='info'>
-                <h3>🔧 Actions système</h3>
-                <button class='button danger' onclick='restartESP()'>🔄 Redémarrer</button>
-            </div>
-        </div>
-    </div>
-    <script>
-        function showTab(idx) {
-            var tabs = document.getElementsByClassName('tab');
-            var contents = document.getElementsByClassName('tab-content');
-            for (var i = 0; i < tabs.length; i++) {
-                tabs[i].classList.remove('active');
-                contents[i].classList.remove('active');
-            }
-            tabs[idx].classList.add('active');
-            contents[idx].classList.add('active');
-        }
-        function sendCommand(cmd) {
-            fetch('/api/command?cmd=' + cmd)
-                .then(response => response.text())
-                .then(data => {
-                    alert('Commande envoyée: ' + cmd);
-                    updateStatus();
-                });
-        }
-        function writeData() {
-            const data = document.getElementById('writeData').value;
-            if (data) {
-                fetch('/api/write?data=' + encodeURIComponent(data))
-                    .then(response => response.text())
-                    .then(data => {
-                        alert('Mode écriture activé: ' + data);
-                        updateStatus();
-                    });
-            } else {
-                alert('Veuillez entrer des données à écrire');
-            }
-        }
-        function updateStatus() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('mode').textContent = data.mode;
-                    document.getElementById('memory').textContent = data.memory + ' bytes';
-                    document.getElementById('uptime').textContent = data.uptime + ' secondes';
-                    document.getElementById('rssi').textContent = data.rssi + ' dBm';
-                });
-        }
-        function updateCardInfo() {
-            fetch('/api/lastcard')
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('cardDetails').textContent = data;
-                    document.getElementById('cardInfo').style.display = (data && data !== 'Aucune carte') ? '' : 'none';
-                });
-        }
-        function restartESP() {
-            if(confirm("Redémarrer l'ESP8266?")) {
-                fetch('/restart')
-                    .then(response => response.text())
-                    .then(data => {
-                        alert('Redémarrage en cours...');
-                        setTimeout(function(){ location.reload(); }, 12000);
-                    });
-            }
-        }
-        function loadApiUrl() {
-            fetch('/api/apiurl')
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('apiUrl').value = data;
-                });
-        }
-        function saveApiUrl() {
-            const url = document.getElementById('apiUrl').value;
-            fetch('/api/setapiurl', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'url=' + encodeURIComponent(url)
-            })
-            .then(response => response.text())
-            .then(data => {
-                document.getElementById('apiUrlStatus').textContent = 'URL enregistrée!';
-                setTimeout(()=>{document.getElementById('apiUrlStatus').textContent='';}, 2000);
-            });
-        }
-        function loadWifiConfig() {
-            fetch('/api/wificonfig')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('wifiSsid').value = data.ssid;
-                    document.getElementById('wifiPass').value = data.pass;
-                });
-        }
-        function saveWifiConfig() {
-            const ssid = document.getElementById('wifiSsid').value;
-            const pass = document.getElementById('wifiPass').value;
-            fetch('/api/setwificonfig', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'ssid=' + encodeURIComponent(ssid) + '&pass=' + encodeURIComponent(pass)
-            })
-            .then(response => response.text())
-            .then(data => {
-                document.getElementById('wifiStatus').textContent = 'WiFi enregistré!';
-                setTimeout(()=>{document.getElementById('wifiStatus').textContent='';}, 2000);
-            });
-        }
-        function loadScanDelay() {
-            fetch('/api/scandelay')
-                .then(response => response.text())
-                .then(data => {
-                    document.getElementById('scanDelay').value = data;
-                });
-        }
-        function saveScanDelay() {
-            const delay = document.getElementById('scanDelay').value;
-            fetch('/api/scandelay', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'delay=' + encodeURIComponent(delay)
-            })
-            .then(response => response.text())
-            .then(data => {
-                document.getElementById('scanDelayStatus').textContent = 'Délai enregistré!';
-                setTimeout(()=>{document.getElementById('scanDelayStatus').textContent='';}, 2000);
-            });
-        }
-        loadApiUrl();
-        loadWifiConfig();
-        loadScanDelay();
-        setInterval(updateStatus, 5000);
-        setInterval(updateCardInfo, 2000);
-        updateStatus();
-        updateCardInfo();
-    </script>
-</body>
-</html>
-        )";
-        webServer.send(200, "text/html", html);
+    webServer.on("/", HTTP_GET, []() {
+        webServer.send(200, "text/html", WEB_PAGE);
     });
     
     // API pour les commandes
@@ -992,6 +779,22 @@ void setupWebServer() {
                 webServer.send(400, "text/plain", "Paramètre 'delay' manquant");
             }
         }
+    });
+    
+    // API pour l'historique des envois à l'API
+    webServer.on("/api/apilog", []() {
+        String json = "[";
+        int count = 0;
+        // Afficher les entrées dans l'ordre chronologique (de la plus ancienne à la plus récente)
+        for (int i = 0; i < API_LOG_SIZE; i++) {
+            int idx = (apiLogIndex + i) % API_LOG_SIZE;
+            if (apiLog[idx].uid.length() == 0) continue;
+            if (count > 0) json += ",";
+            json += "{\"t\":" + String(apiLog[idx].timestamp) + ",\"uid\":\"" + apiLog[idx].uid + "\",\"code\":" + String(apiLog[idx].httpCode) + "}";
+            count++;
+        }
+        json += "]";
+        webServer.send(200, "application/json", json);
     });
     
     // Redémarrage
@@ -1153,9 +956,39 @@ void sendUidToApi(const String& uid) {
         WiFiClient wifiClient;
         String url = apiUrl;
         if (!url.endsWith("/")) url += "/";
-        url += "?uid=" + uid;
         http.begin(wifiClient, url);
-        int httpCode = http.GET();
+        http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+        int httpCode = http.POST("uid=" + uid);
+        logApiSend(uid, httpCode);
         http.end();
+    } else {
+        logApiSend(uid, -1);
     }
+}
+
+void logApiSend(const String& uid, int httpCode) {
+    apiLog[apiLogIndex].timestamp = millis() / 1000;
+    apiLog[apiLogIndex].uid = uid;
+    apiLog[apiLogIndex].httpCode = httpCode;
+    apiLogIndex = (apiLogIndex + 1) % API_LOG_SIZE;
+}
+
+// Fonction pour lister les fichiers dans LittleFS
+void listLittleFSFiles() {
+    Serial.println("Contenu de LittleFS :");
+    File root = LittleFS.open("/", "r");
+    if (!root) {
+        Serial.println("  Erreur d'accès à LittleFS");
+        return;
+    }
+    File file = root.openNextFile();
+    while (file) {
+        Serial.print("  ");
+        Serial.print(file.name());
+        Serial.print("  [");
+        Serial.print(file.size());
+        Serial.println(" octets]");
+        file = root.openNextFile();
+    }
+    Serial.println("----------------------");
 }
