@@ -950,20 +950,40 @@ void blinkLed(int times, int duration) {
 // Fonction pour envoyer l'UID à l'API
 void sendUidToApi(const String& uid) {
     String url = apiUrl;
+    Serial.println("[API] Préparation envoi UID: " + uid + " vers " + url);
     if (WiFi.status() == WL_CONNECTED && url.startsWith("http")) {
-        // S'assurer que l'URL se termine par /uid (sans double slash)
-        if (!url.endsWith("/uid")) {
-            if (url.endsWith("/")) url += "uid";
-            else url += "/uid";
-        }
         HTTPClient http;
-        WiFiClient wifiClient;
-        http.begin(wifiClient, url);
+        bool beginOk = false;
+        if (url.startsWith("https://")) {
+            #include <WiFiClientSecure.h>
+            WiFiClientSecure client;
+            client.setInsecure(); // Pour ignorer la vérification du certificat (à sécuriser en prod)
+            beginOk = http.begin(client, url);
+        } else {
+            WiFiClient client;
+            beginOk = http.begin(client, url);
+        }
+        if (!beginOk) {
+            Serial.println("[API] Erreur http.begin()");
+            logApiSend(uid, -2, url);
+            return;
+        }
         http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+        Serial.println("[API] Envoi POST...");
         int httpCode = http.POST("uid=" + uid);
+        Serial.print("[API] Code HTTP: ");
+        Serial.println(httpCode);
+        if (httpCode > 0) {
+            String payload = http.getString();
+            Serial.print("[API] Réponse: ");
+            Serial.println(payload);
+        } else {
+            Serial.println("[API] Erreur POST: " + String(http.errorToString(httpCode)));
+        }
         logApiSend(uid, httpCode, url);
         http.end();
     } else {
+        Serial.println("[API] WiFi non connecté ou URL invalide");
         logApiSend(uid, -1, url);
     }
 }
