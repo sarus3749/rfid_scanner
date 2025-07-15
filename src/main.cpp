@@ -227,28 +227,41 @@ void handleRFIDOperations() {
     // Opération selon le mode
     String cardContent = "UID: " + uid + "\nType: " + String(mfrc522.PICC_GetTypeName(piccType)) + "\n";
     if (mode == "READ") {
-        // Lecture de plusieurs blocs (secteurs 1 et 2)
-        for (byte sector = 1; sector <= 2; sector++) {
-            for (byte block = 0; block < 3; block++) {
+        // Vérification du type de carte
+        if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&
+            piccType != MFRC522::PICC_TYPE_MIFARE_1K &&
+            piccType != MFRC522::PICC_TYPE_MIFARE_4K) {
+            cardContent += "<b>Type de carte non supporté pour la lecture mémoire (" + String(mfrc522.PICC_GetTypeName(piccType)) + ")</b><br/>";
+            lastCardInfo = cardContent;
+            sendUidToApi(uid);
+            return;
+        }
+        // Lecture de plusieurs blocs (secteurs 1 à 15, blocs 0 à 2)
+        for (byte sector = 1; sector < 16; sector++) {
+            for (byte block = 0; block < 3; block++) { // Éviter le bloc trailer
                 byte blockAddr = sector * 4 + block;
                 byte buffer[18];
                 byte size = sizeof(buffer);
+                // Réinitialisation de la clé par défaut à chaque bloc
+                for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
                 MFRC522::StatusCode status = mfrc522.PCD_Authenticate(
-                    MFRC522::PICC_CMD_MF_AUTH_KEY_A, 
-                    blockAddr, 
-                    &key, 
+                    MFRC522::PICC_CMD_MF_AUTH_KEY_A,
+                    blockAddr,
+                    &key,
                     &(mfrc522.uid)
                 );
                 if (status != MFRC522::STATUS_OK) {
-                    cardContent += "Bloc " + String(blockAddr) + ": Auth échouée\n";
+                    String errMsg = String(mfrc522.GetStatusCodeName(status));
+                    cardContent += "Secteur " + String(sector) + " Bloc " + String(block) + ": Auth échouée (" + errMsg + ")<br/>";
                     continue;
                 }
                 status = mfrc522.MIFARE_Read(blockAddr, buffer, &size);
                 if (status != MFRC522::STATUS_OK) {
-                    cardContent += "Bloc " + String(blockAddr) + ": Lecture échouée\n";
+                    String errMsg = String(mfrc522.GetStatusCodeName(status));
+                    cardContent += "Secteur " + String(sector) + " Bloc " + String(block) + ": Lecture échouée (" + errMsg + ")<br/>";
                     continue;
                 }
-                cardContent += "Bloc " + String(blockAddr) + ": ";
+                cardContent += "Secteur " + String(sector) + " Bloc " + String(block) + ": ";
                 for (byte i = 0; i < 16; i++) {
                     if (buffer[i] < 0x10) cardContent += " 0";
                     else cardContent += " ";
@@ -259,11 +272,11 @@ void handleRFIDOperations() {
                     if (buffer[i] >= 32 && buffer[i] <= 126) cardContent += (char)buffer[i];
                     else cardContent += ".";
                 }
-                cardContent += "\n";
+                cardContent += "<br/>";
             }
         }
         lastCardInfo = cardContent;
-        sendUidToApi(uid); // Ajouté : log et appel API
+        sendUidToApi(uid);
         readCard();
     } else if (mode == "WRITE") {
         lastCardInfo = cardContent + "(Mode écriture)";
@@ -282,58 +295,49 @@ void handleRFIDOperations() {
 }
 
 void readCard() {
-    Serial.println("--- Lecture des données ---");
-    
-    // Lecture de plusieurs blocs
-    for (byte sector = 1; sector <= 2; sector++) {
-        for (byte block = 0; block < 3; block++) {
+    Serial.println("--- Lecture complète de la carte ---");
+    // Lecture de tous les secteurs et blocs (hors secteur 0 pour éviter d'endommager le tag)
+    for (byte sector = 1; sector < 16; sector++) {
+        Serial.print("Secteur ");
+        Serial.print(sector);
+        Serial.println(":");
+        for (byte block = 0; block < 3; block++) { // Éviter le bloc trailer (block 3)
             byte blockAddr = sector * 4 + block;
             byte buffer[18];
             byte size = sizeof(buffer);
-            
             // Authentification
             MFRC522::StatusCode status = mfrc522.PCD_Authenticate(
-                MFRC522::PICC_CMD_MF_AUTH_KEY_A, 
-                blockAddr, 
-                &key, 
+                MFRC522::PICC_CMD_MF_AUTH_KEY_A,
+                blockAddr,
+                &key,
                 &(mfrc522.uid)
             );
-            
             if (status != MFRC522::STATUS_OK) {
-                Serial.print("Auth échouée bloc ");
+                Serial.print("  Bloc ");
                 Serial.print(blockAddr);
-                Serial.print(": ");
+                Serial.print(": Auth échouée: ");
                 Serial.println(mfrc522.GetStatusCodeName(status));
                 continue;
             }
-            
             // Lecture du bloc
             status = mfrc522.MIFARE_Read(blockAddr, buffer, &size);
             if (status != MFRC522::STATUS_OK) {
-                Serial.print("Lecture échouée bloc ");
+                Serial.print("  Bloc ");
                 Serial.print(blockAddr);
-                Serial.print(": ");
+                Serial.print(": Lecture échouée: ");
                 Serial.println(mfrc522.GetStatusCodeName(status));
                 continue;
             }
-            
-            // Affichage des données
-            Serial.print("Bloc ");
+            Serial.print("  Bloc ");
             Serial.print(blockAddr);
-            Serial.print(" (S");
-            Serial.print(sector);
-            Serial.print("B");
-            Serial.print(block);
-            Serial.print("): ");
-            
+            Serial.print(": ");
             // Données en hexadécimal
             for (byte i = 0; i < 16; i++) {
                 Serial.print(buffer[i] < 0x10 ? " 0" : " ");
                 Serial.print(buffer[i], HEX);
             }
-            
-            // Données en texte
             Serial.print(" | ");
+            // Données en texte
             for (byte i = 0; i < 16; i++) {
                 if (buffer[i] >= 32 && buffer[i] <= 126) {
                     Serial.print((char)buffer[i]);
