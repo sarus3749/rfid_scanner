@@ -4,13 +4,13 @@
 
 ### 1. Modification des paramètres WiFi
 
-Dans le fichier `rfid_esp8266_d1mini.ino`, modifiez ces lignes :
+Dans le fichier `main.cpp`, modifiez ces lignes :
 
 ```cpp
 // Configuration WiFi (à modifier selon votre réseau)
 const char* ssid = "VotreSSID";           // Nom de votre réseau WiFi
 const char* password = "VotreMotDePasse"; // Mot de passe WiFi
-const char* otaPassword = "admin123";     // Mot de passe pour OTA
+const char* otaPassword = "password123";     // Mot de passe pour OTA
 ```
 
 ### 2. Première connexion
@@ -65,7 +65,7 @@ const char* otaPassword = "admin123";     // Mot de passe pour OTA
 ## Sécurité OTA
 
 ### Mot de passe OTA
-Le mot de passe par défaut est `admin123`. Changez-le dans le code :
+Le mot de passe par défaut est `password123`. Changez-le dans le code :
 
 ```cpp
 const char* otaPassword = "VotreNouveauMotDePasse";
@@ -145,14 +145,3 @@ IP: 192.168.1.100
 OTA: Activé
 ============================
 ```
-
-## Avantages de l'OTA
-
-- ✅ **Pas de câble USB requis** pour les mises à jour
-- ✅ **Mise à jour à distance** même si l'ESP8266 est installé
-- ✅ **Interface web intuitive** pour le contrôle
-- ✅ **Monitoring en temps réel** des opérations
-- ✅ **Sauvegarde automatique** des paramètres
-- ✅ **Récupération d'erreur** intégrée
-
-L'OTA est particulièrement utile quand l'ESP8266 est installé dans un boîtier ou à un endroit difficile d'accès.
