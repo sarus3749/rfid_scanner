@@ -80,8 +80,8 @@ void setupOTA();
 void setupWebServer();
 void loadApiUrl();
 void saveApiUrl(const String& url);
-void blinkLed(int times = 2, int duration = 100);
-void sendUidToApi(const String& uid);
+void blinkBuzzer(int times = 2, int duration = 100);
+int sendUidToApi(const String& uid);
 void loadWifiConfig();
 void saveWifiConfig(const String& ssid, const String& pass);
 void startConfigAP();
@@ -227,7 +227,7 @@ void handleRFIDOperations() {
         return;
     }
     lastScanTime = millis();
-    blinkLed();
+    blinkBuzzer();
     Serial.println("\n=== Carte détectée ===");
     // Affichage de l'UID
     Serial.print("UID: ");
@@ -246,12 +246,12 @@ void handleRFIDOperations() {
     // Opération selon le mode
     String cardContent = "UID: " + uid + "\nType: " + String(mfrc522.PICC_GetTypeName(piccType)) + "<br/>\n";
     if (mode == "READ") {
+        bool apiSuccess = false;
         if (piccType == MFRC522::PICC_TYPE_MIFARE_UL) {
             // Lecture spécifique Ultralight (16 pages de 4 octets)
             Serial.println("--- Lecture MIFARE Ultralight ---");
             String ulDump = "<b>Lecture MIFARE Ultralight :</b><br/>";
             for (byte page = 0; page < 16; page++) {
-                webServer.handleClient();
                 byte buffer[18] = {0};
                 byte size = 18;
                 MFRC522::StatusCode status = mfrc522.MIFARE_Read(page, buffer, &size);
@@ -282,7 +282,8 @@ void handleRFIDOperations() {
                 ulDump += "Page " + String(page) + ": " + hexStr + " | " + txtStr + "<br/>";
             }
             lastCardInfo = cardContent + ulDump;
-            sendUidToApi(uid);
+            int httpCode = sendUidToApi(uid);
+            apiSuccess = (httpCode == 200);
         } else if (
             piccType == MFRC522::PICC_TYPE_ISO_14443_4 ||
             piccType == MFRC522::PICC_TYPE_ISO_18092 ||
@@ -294,11 +295,18 @@ void handleRFIDOperations() {
             // Lecture classique
             String dump = getCardDump();
             lastCardInfo = cardContent + dump;
-            sendUidToApi(uid);
+            int httpCode = sendUidToApi(uid);
+            apiSuccess = (httpCode == 200);
         } else {
             cardContent += "<b>Type de carte non supporté pour la lecture mémoire (" + String(mfrc522.PICC_GetTypeName(piccType)) + ")</b>";
             lastCardInfo = cardContent;
-            sendUidToApi(uid);
+            int httpCode = sendUidToApi(uid);
+            apiSuccess = (httpCode == 200);
+        }
+        if (apiSuccess) {
+            blinkBuzzer(2, 100); // Clignote seulement si API OK
+        } else {
+            blinkBuzzer(5, 50); // Clignote 5 fois à 50ms si API != OK
         }
     } else if (mode == "WRITE") {
         lastCardInfo = cardContent + "(Mode écriture)";
@@ -320,13 +328,11 @@ String getCardDump() {
     Serial.println("--- Lecture complète de la carte ---");
     String sectorDump = "<b>Lecture des secteurs RFID :</b><br/>";
     for (byte sector = 1; sector < 16; sector++) {
-        webServer.handleClient();
         Serial.print("Secteur ");
         Serial.print(sector);
         Serial.println(":");
         sectorDump += "Secteur " + String(sector) + ":<br/>";
         for (byte block = 0; block < 3; block++) {
-            webServer.handleClient();
             byte blockAddr = sector * 4 + block;
             byte buffer[18] = {0};
             byte size = sizeof(buffer);
@@ -1039,7 +1045,7 @@ void saveScanDelay(unsigned long val) {
 }
 
 // Fonction pour faire clignoter la LED
-void blinkLed(int times, int duration) {
+void blinkBuzzer(int times, int duration) {
     for (int i = 0; i < times; i++) {
         digitalWrite(BUZZER_PIN, HIGH);
         delay(duration);
@@ -1048,17 +1054,18 @@ void blinkLed(int times, int duration) {
     }
 }
 
-// Fonction pour envoyer l'UID à l'API
-void sendUidToApi(const String& uid) {
+// Fonction pour envoyer l'UID à l'API et retourner le code HTTP
+int sendUidToApi(const String& uid) {
     String url = apiUrl;
     Serial.println("[API] Préparation envoi UID: " + uid + " vers " + url);
+    int httpCode = -1;
     if (WiFi.status() == WL_CONNECTED && url.startsWith("http")) {
         HTTPClient http;
         bool beginOk = false;
         if (url.startsWith("https://")) {
             #include <WiFiClientSecure.h>
             WiFiClientSecure client;
-            client.setInsecure(); // Pour ignorer la vérification du certificat (à sécuriser en prod)
+            client.setInsecure();
             beginOk = http.begin(client, url);
         } else {
             WiFiClient client;
@@ -1067,11 +1074,11 @@ void sendUidToApi(const String& uid) {
         if (!beginOk) {
             Serial.println("[API] Erreur http.begin()");
             logApiSend(uid, -2, url);
-            return;
+            return -2;
         }
         http.addHeader("Content-Type", "application/x-www-form-urlencoded");
         Serial.println("[API] Envoi POST...");
-        int httpCode = http.POST("uid=" + uid);
+        httpCode = http.POST("uid=" + uid);
         Serial.print("[API] Code HTTP: ");
         Serial.println(httpCode);
         if (httpCode > 0) {
@@ -1086,7 +1093,9 @@ void sendUidToApi(const String& uid) {
     } else {
         Serial.println("[API] WiFi non connecté ou URL invalide");
         logApiSend(uid, -1, url);
+        httpCode = -1;
     }
+    return httpCode;
 }
 
 void logApiSend(const String& uid, int httpCode, const String& url) {
