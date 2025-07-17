@@ -227,7 +227,6 @@ void handleRFIDOperations() {
         return;
     }
     lastScanTime = millis();
-    blinkBuzzer();
     Serial.println("\n=== Carte détectée ===");
     // Affichage de l'UID
     Serial.print("UID: ");
@@ -245,10 +244,10 @@ void handleRFIDOperations() {
     Serial.println(mfrc522.PICC_GetTypeName(piccType));
     // Opération selon le mode
     String cardContent = "UID: " + uid + "\nType: " + String(mfrc522.PICC_GetTypeName(piccType)) + "<br/>\n";
+	blinkBuzzer();
     if (mode == "READ") {
         bool apiSuccess = false;
         if (piccType == MFRC522::PICC_TYPE_MIFARE_UL) {
-            // Lecture spécifique Ultralight (16 pages de 4 octets)
             Serial.println("--- Lecture MIFARE Ultralight ---");
             String ulDump = "<b>Lecture MIFARE Ultralight :</b><br/>";
             for (byte page = 0; page < 16; page++) {
@@ -279,8 +278,12 @@ void handleRFIDOperations() {
                     hexStr = "(Lecture échouée)";
                     txtStr = "(Lecture échouée)";
                 }
-                ulDump += "Page " + String(page) + ": " + hexStr + " | " + txtStr + "<br/>";
+                // Limite l'affichage HTML aux 4 premières pages
+                if (page < 4) {
+                    ulDump += "Page " + String(page) + ": " + hexStr + " | " + txtStr + "<br/>";
+                }
             }
+            ulDump += "<i>Pages suivantes affichées uniquement sur le port série.</i><br/>";
             lastCardInfo = cardContent + ulDump;
             int httpCode = sendUidToApi(uid);
             apiSuccess = (httpCode == 200);
@@ -304,7 +307,7 @@ void handleRFIDOperations() {
             apiSuccess = (httpCode == 200);
         }
         if (apiSuccess) {
-            blinkBuzzer(2, 100); // Clignote seulement si API OK
+            blinkBuzzer(1, 800); // Clignote seulement si API OK
         } else {
             blinkBuzzer(5, 50); // Clignote 5 fois à 50ms si API != OK
         }
@@ -331,12 +334,14 @@ String getCardDump() {
         Serial.print("Secteur ");
         Serial.print(sector);
         Serial.println(":");
-        sectorDump += "Secteur " + String(sector) + ":<br/>";
+        // Limite l'affichage HTML aux 2 premiers secteurs
+        if (sector < 3) {
+            sectorDump += "Secteur " + String(sector) + ":<br/>";
+        }
         for (byte block = 0; block < 3; block++) {
             byte blockAddr = sector * 4 + block;
             byte buffer[18] = {0};
             byte size = sizeof(buffer);
-            // Réinitialisation de la clé à chaque lecture (clé 0xFF)
             for (byte k = 0; k < 6; k++) key.keyByte[k] = 0xFF;
             Serial.print("  Bloc ");
             Serial.print(blockAddr);
@@ -390,9 +395,12 @@ String getCardDump() {
                 hexStr = "(Auth échouée)";
                 txtStr = "(Auth échouée)";
             }
-            sectorDump += "&nbsp;&nbsp;Bloc " + String(blockAddr) + ": " + hexStr + " | " + txtStr + "<br/>";
+            if (sector < 3) {
+                sectorDump += "&nbsp;&nbsp;Bloc " + String(blockAddr) + ": " + hexStr + " | " + txtStr + "<br/>";
+            }
         }
     }
+    sectorDump += "<i>Secteurs suivants affichés uniquement sur le port série.</i><br/>";
     return sectorDump;
 }
 
