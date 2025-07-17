@@ -294,7 +294,6 @@ String getCardDump() {
             Serial.print(" | Clé utilisée: ");
             for (byte k = 0; k < 6; k++) Serial.print(key.keyByte[k], HEX);
             Serial.print(" | ");
-            delay(50); // Délai plus long avant authentification
             MFRC522::StatusCode status = mfrc522.PCD_Authenticate(
                 MFRC522::PICC_CMD_MF_AUTH_KEY_A,
                 blockAddr,
