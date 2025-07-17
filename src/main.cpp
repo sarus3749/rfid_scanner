@@ -251,6 +251,7 @@ void handleRFIDOperations() {
             Serial.println("--- Lecture MIFARE Ultralight ---");
             String ulDump = "<b>Lecture MIFARE Ultralight :</b><br/>";
             for (byte page = 0; page < 16; page++) {
+                webServer.handleClient();
                 byte buffer[18] = {0};
                 byte size = 18;
                 MFRC522::StatusCode status = mfrc522.MIFARE_Read(page, buffer, &size);
@@ -319,11 +320,13 @@ String getCardDump() {
     Serial.println("--- Lecture complète de la carte ---");
     String sectorDump = "<b>Lecture des secteurs RFID :</b><br/>";
     for (byte sector = 1; sector < 16; sector++) {
+        webServer.handleClient();
         Serial.print("Secteur ");
         Serial.print(sector);
         Serial.println(":");
         sectorDump += "Secteur " + String(sector) + ":<br/>";
         for (byte block = 0; block < 3; block++) {
+            webServer.handleClient();
             byte blockAddr = sector * 4 + block;
             byte buffer[18] = {0};
             byte size = sizeof(buffer);
