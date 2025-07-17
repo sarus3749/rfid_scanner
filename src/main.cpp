@@ -20,6 +20,7 @@
 #include <ESP8266HTTPClient.h>
 #include <EEPROM.h>
 #include <webpage.h>
+#include <login_page.h>
 
 
 // Création des instances
@@ -56,6 +57,11 @@ struct ApiLogEntry {
 ApiLogEntry apiLog[API_LOG_SIZE];
 int apiLogIndex = 0;
 
+// === Code d'accès à l'interface web ===
+#define WEB_CODE_ADDR (SCAN_DELAY_ADDR + SCAN_DELAY_SIZE)
+#define WEB_CODE_MAXLEN 16
+String webAccessCode = "admin";
+
 // === Prototypes des fonctions ===
 void setup();
 void loop();
@@ -82,6 +88,8 @@ void startConfigAP();
 void loadScanDelay();
 void saveScanDelay(unsigned long val);
 void logApiSend(const String& uid, int httpCode, const String& url);
+void loadWebAccessCode();
+void saveWebAccessCode(const String& code);
 
 void setup() {
     Serial.begin(115200);
@@ -115,6 +123,7 @@ void setup() {
     loadApiUrl();
     loadWifiConfig();
     loadScanDelay();
+    loadWebAccessCode();
     if (!otaEnabled) {
         WiFi.mode(WIFI_OFF);
     } else {
@@ -234,7 +243,7 @@ void handleRFIDOperations() {
     Serial.print("Type: ");
     Serial.println(mfrc522.PICC_GetTypeName(piccType));
     // Opération selon le mode
-    String cardContent = "UID: " + uid + "\nType: " + String(mfrc522.PICC_GetTypeName(piccType)) + "\n";
+    String cardContent = "UID: " + uid + "\nType: " + String(mfrc522.PICC_GetTypeName(piccType)) + "<br/>\n";
     if (mode == "READ") {
         // Vérification du type de carte
         if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&
@@ -662,17 +671,40 @@ void setupOTA() {
 void setupWebServer() {
     static bool started = false;
     if (started) return;
-    // Page principale
+    // Page principale protégée par code
     webServer.on("/", HTTP_GET, []() {
-        webServer.send(200, "text/html", WEB_PAGE);
+        if (!webServer.hasArg("code") || webServer.arg("code") != webAccessCode) {
+            webServer.send(401, "text/html", LOGIN_PAGE);
+            return;
+        }
+        String page = WEB_PAGE;
+        String msg = "";
+        if (webServer.hasArg("msg")) msg = webServer.arg("msg");
+        page.replace("%MSG%", msg);
+        webServer.send(200, "text/html", page);
     });
-    
-    // API pour les commandes
+    // Modification du code d'accès via POST sur la page principale
+    webServer.on("/", HTTP_POST, []() {
+        if (!webServer.hasArg("code") || webServer.arg("code") != webAccessCode) {
+            webServer.send(401, "text/html", LOGIN_PAGE);
+            return;
+        }
+        if (webServer.hasArg("newcode")) {
+            saveWebAccessCode(webServer.arg("newcode"));
+            String page = WEB_PAGE;
+            page.replace("%MSG%", "Code modifié !");
+            webServer.send(200, "text/html", page);
+        } else {
+            String page = WEB_PAGE;
+            page.replace("%MSG%", "Erreur : paramètre manquant.");
+            webServer.send(400, "text/html", page);
+        }
+    });
+    // Toutes les routes API sont publiques
     webServer.on("/api/command", []() {
         if (webServer.hasArg("cmd")) {
             String cmd = webServer.arg("cmd");
             cmd.toUpperCase();
-            
             if (cmd == "READ") {
                 mode = "READ";
                 continuousMode = true;
@@ -681,14 +713,11 @@ void setupWebServer() {
             } else if (cmd == "INFO") {
                 showSystemInfo();
             }
-            
             webServer.send(200, "text/plain", "Commande exécutée: " + cmd);
         } else {
             webServer.send(400, "text/plain", "Paramètre 'cmd' manquant");
         }
     });
-    
-    // API pour l'écriture
     webServer.on("/api/write", []() {
         if (webServer.hasArg("data")) {
             dataToWrite = webServer.arg("data");
@@ -699,8 +728,6 @@ void setupWebServer() {
             webServer.send(400, "text/plain", "Paramètre 'data' manquant");
         }
     });
-    
-    // API pour le statut
     webServer.on("/api/status", []() {
         String json = "{";
         json += "\"mode\":\"" + mode + "\",";
@@ -710,7 +737,6 @@ void setupWebServer() {
         json += "}";
         webServer.send(200, "application/json", json);
     });
-    // API pour la dernière carte scannée
     webServer.on("/api/lastcard", []() {
         webServer.send(200, "text/plain", lastCardInfo);
     });
@@ -828,6 +854,20 @@ void setupWebServer() {
             delay(duration);
         }
         webServer.send(200, "text/plain", "Buzzer OK");
+    });
+    
+    // API pour le code d'accès web
+    webServer.on("/api/webcode", []() {
+        if (webServer.method() == HTTP_GET) {
+            webServer.send(200, "text/plain", webAccessCode);
+        } else if (webServer.method() == HTTP_POST) {
+            if (webServer.hasArg("code")) {
+                saveWebAccessCode(webServer.arg("code"));
+                webServer.send(200, "text/plain", "OK");
+            } else {
+                webServer.send(400, "text/plain", "Paramètre 'code' manquant");
+            }
+        }
     });
     
     webServer.begin();
@@ -995,4 +1035,30 @@ void logApiSend(const String& uid, int httpCode, const String& url) {
     apiLog[apiLogIndex].httpCode = httpCode;
     apiLog[apiLogIndex].url = url;
     apiLogIndex = (apiLogIndex + 1) % API_LOG_SIZE;
+}
+
+// Fonction pour charger le code d'accès à l'interface web depuis l'EEPROM
+void loadWebAccessCode() {
+    EEPROM.begin(EEPROM_SIZE);
+    char buf[WEB_CODE_MAXLEN+1];
+    for (int i = 0; i < WEB_CODE_MAXLEN; i++) {
+        buf[i] = EEPROM.read(WEB_CODE_ADDR + i);
+        if (buf[i] == '\0') break;
+    }
+    buf[WEB_CODE_MAXLEN] = '\0';
+    webAccessCode = String(buf);
+    EEPROM.end();
+    if (webAccessCode.length() == 0) webAccessCode = "admin";
+}
+
+// Fonction pour sauvegarder le code d'accès à l'interface web dans l'EEPROM
+void saveWebAccessCode(const String& code) {
+    EEPROM.begin(EEPROM_SIZE);
+    for (int i = 0; i < WEB_CODE_MAXLEN; i++) {
+        if (i < code.length()) EEPROM.write(WEB_CODE_ADDR + i, code[i]);
+        else EEPROM.write(WEB_CODE_ADDR + i, 0);
+    }
+    EEPROM.commit();
+    EEPROM.end();
+    webAccessCode = code;
 }

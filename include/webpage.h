@@ -105,6 +105,15 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                     <input type='submit' value='📤 Téléverser' class='button'>
                 </form>
             </div>
+            <div class='info'>
+                <h3>🔒 Code d'accès à l'interface web</h3>
+                <p>Code actuel : <span id='webCode'>Chargement...</span></p>
+                <form id='webCodeForm' onsubmit='return changeWebCode();'>
+                    <input type='text' id='newWebCode' placeholder='Nouveau code' maxlength='16' required>
+                    <button class='button' type='submit'>💾 Modifier le code</button>
+                    <span id='webCodeStatus'></span>
+                </form>
+            </div>
         </div>
         <div class='tab-content' id='tab-apilog'>
             <div class='terminal' id='apiTerminal'></div>
@@ -152,8 +161,21 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
             str += h + 'h ' + m + 'm ' + s + 's';
             return str;
         }
+        function getCurrentWebCode() {
+            return document.getElementById('webCode').textContent;
+        }
+        function updateCardInfo() {
+            const code = getCurrentWebCode();
+            fetch('/api/lastcard?code=' + encodeURIComponent(code))
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('cardDetails').innerHTML = data;
+                    document.getElementById('cardInfo').style.display = (data && data !== 'Aucune carte') ? '' : 'none';
+                });
+        }
         function updateStatus() {
-            fetch('/api/status')
+            const code = getCurrentWebCode();
+            fetch('/api/status?code=' + encodeURIComponent(code))
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('mode').textContent = data.mode;
@@ -162,23 +184,24 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                     document.getElementById('rssi').textContent = data.rssi + ' dBm';
                 });
         }
-        function updateCardInfo() {
-            fetch('/api/lastcard')
-                .then(response => response.text())
+        function updateApiTerminal() {
+            fetch('/api/apilog')
+                .then(response => response.json())
                 .then(data => {
-                    document.getElementById('cardDetails').textContent = data;
-                    document.getElementById('cardInfo').style.display = (data && data !== 'Aucune carte') ? '' : 'none';
+                    let html = '';
+                    data.forEach(entry => {
+                        html += '[' + entry.t + 's] UID=' + entry.uid + '  HTTP=' + entry.code + '<br>URL: ' + entry.url + '<br>';
+                    });
+                    document.getElementById('apiTerminal').innerHTML = html || '<i>Aucun envoi enregistré</i>';
                 });
         }
-        function restartESP() {
-            if(confirm("Redémarrer l'ESP8266?")) {
-                fetch('/restart')
-                    .then(response => response.text())
-                    .then(data => {
-                        alert('Redémarrage en cours...');
-                        setTimeout(function(){ location.reload(); }, 12000);
-                    });
-            }
+        function buzzerTest() {
+            const times = document.getElementById('buzzerTimes').value;
+            const duration = document.getElementById('buzzerDuration').value;
+            fetch(`/api/buzzer?times=${times}&duration=${duration}`)
+                .then(r => r.text())
+                .then(txt => document.getElementById('buzzerResult').textContent = txt)
+                .catch(() => document.getElementById('buzzerResult').textContent = 'Erreur');
         }
         function loadApiUrl() {
             fetch('/api/apiurl')
@@ -242,28 +265,33 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 setTimeout(()=>{document.getElementById('scanDelayStatus').textContent='';}, 2000);
             });
         }
-        function updateApiTerminal() {
-            fetch('/api/apilog')
-                .then(response => response.json())
-                .then(data => {
-                    let html = '';
-                    data.forEach(entry => {
-                        html += '[' + entry.t + 's] UID=' + entry.uid + '  HTTP=' + entry.code + '<br>URL: ' + entry.url + '<br>';
-                    });
-                    document.getElementById('apiTerminal').innerHTML = html || '<i>Aucun envoi enregistré</i>';
+        function loadWebCode() {
+            fetch('/api/webcode')
+                .then(response => response.text())
+                .then(code => {
+                    document.getElementById('webCode').textContent = code;
                 });
         }
-        function buzzerTest() {
-            const times = document.getElementById('buzzerTimes').value;
-            const duration = document.getElementById('buzzerDuration').value;
-            fetch(`/api/buzzer?times=${times}&duration=${duration}`)
-                .then(r => r.text())
-                .then(txt => document.getElementById('buzzerResult').textContent = txt)
-                .catch(() => document.getElementById('buzzerResult').textContent = 'Erreur');
+        function changeWebCode() {
+            const newCode = document.getElementById('newWebCode').value;
+            if (!newCode) return false;
+            fetch('/api/webcode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'code=' + encodeURIComponent(newCode)
+            })
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('webCodeStatus').textContent = 'Code modifié !';
+                loadWebCode();
+                setTimeout(()=>{document.getElementById('webCodeStatus').textContent='';}, 2000);
+            });
+            return false;
         }
         loadApiUrl();
         loadWifiConfig();
         loadScanDelay();
+        loadWebCode();
         setInterval(updateStatus, 5000);
         setInterval(updateCardInfo, 2000);
         setInterval(updateApiTerminal, 2000);
