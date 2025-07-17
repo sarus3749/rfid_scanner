@@ -287,6 +287,14 @@ String getCardDump() {
             byte blockAddr = sector * 4 + block;
             byte buffer[18] = {0};
             byte size = sizeof(buffer);
+            // Réinitialisation de la clé à chaque lecture (clé 0xFF)
+            for (byte k = 0; k < 6; k++) key.keyByte[k] = 0xFF;
+            Serial.print("  Bloc ");
+            Serial.print(blockAddr);
+            Serial.print(" | Clé utilisée: ");
+            for (byte k = 0; k < 6; k++) Serial.print(key.keyByte[k], HEX);
+            Serial.print(" | ");
+            delay(50); // Délai plus long avant authentification
             MFRC522::StatusCode status = mfrc522.PCD_Authenticate(
                 MFRC522::PICC_CMD_MF_AUTH_KEY_A,
                 blockAddr,
@@ -328,6 +336,9 @@ String getCardDump() {
                 Serial.print(blockAddr);
                 Serial.print(": Auth échouée: ");
                 Serial.println(mfrc522.GetStatusCodeName(status));
+                if (status == MFRC522::STATUS_TIMEOUT) {
+                    Serial.println("[AIDE] Vérifiez le câblage SPI, l'alimentation du module RC522, et la position de la carte.");
+                }
                 hexStr = "(Auth échouée)";
                 txtStr = "(Auth échouée)";
             }
