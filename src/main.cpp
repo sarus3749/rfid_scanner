@@ -246,19 +246,59 @@ void handleRFIDOperations() {
     // Opération selon le mode
     String cardContent = "UID: " + uid + "\nType: " + String(mfrc522.PICC_GetTypeName(piccType)) + "<br/>\n";
     if (mode == "READ") {
-        // Vérification du type de carte
-        if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&
-            piccType != MFRC522::PICC_TYPE_MIFARE_1K &&
-            piccType != MFRC522::PICC_TYPE_MIFARE_4K) {
+        if (piccType == MFRC522::PICC_TYPE_MIFARE_UL) {
+            // Lecture spécifique Ultralight (16 pages de 4 octets)
+            Serial.println("--- Lecture MIFARE Ultralight ---");
+            String ulDump = "<b>Lecture MIFARE Ultralight :</b><br/>";
+            for (byte page = 0; page < 16; page++) {
+                byte buffer[18] = {0};
+                byte size = 18;
+                MFRC522::StatusCode status = mfrc522.MIFARE_Read(page, buffer, &size);
+                String hexStr = "";
+                String txtStr = "";
+                if (status == MFRC522::STATUS_OK) {
+                    for (byte i = 0; i < 4; i++) {
+                        Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+                        Serial.print(buffer[i], HEX);
+                        hexStr += (buffer[i] < 0x10 ? " 0" : " ");
+                        hexStr += String(buffer[i], HEX);
+                        if (buffer[i] >= 32 && buffer[i] <= 126) {
+                            txtStr += (char)buffer[i];
+                        } else {
+                            txtStr += ".";
+                        }
+                    }
+                    Serial.print(" | ");
+                    Serial.println(txtStr);
+                } else {
+                    Serial.print("Page ");
+                    Serial.print(page);
+                    Serial.print(": Lecture échouée: ");
+                    Serial.println(mfrc522.GetStatusCodeName(status));
+                    hexStr = "(Lecture échouée)";
+                    txtStr = "(Lecture échouée)";
+                }
+                ulDump += "Page " + String(page) + ": " + hexStr + " | " + txtStr + "<br/>";
+            }
+            lastCardInfo = cardContent + ulDump;
+            sendUidToApi(uid);
+        } else if (
+            piccType == MFRC522::PICC_TYPE_ISO_14443_4 ||
+            piccType == MFRC522::PICC_TYPE_ISO_18092 ||
+            piccType == MFRC522::PICC_TYPE_MIFARE_MINI ||
+            piccType == MFRC522::PICC_TYPE_MIFARE_1K ||
+            piccType == MFRC522::PICC_TYPE_MIFARE_4K ||
+            piccType == MFRC522::PICC_TYPE_MIFARE_PLUS ||
+            piccType == MFRC522::PICC_TYPE_MIFARE_DESFIRE) {
+            // Lecture classique
+            String dump = getCardDump();
+            lastCardInfo = cardContent + dump;
+            sendUidToApi(uid);
+        } else {
             cardContent += "<b>Type de carte non supporté pour la lecture mémoire (" + String(mfrc522.PICC_GetTypeName(piccType)) + ")</b>";
             lastCardInfo = cardContent;
             sendUidToApi(uid);
-            return;
         }
-        // Lecture complète des secteurs
-        String dump = getCardDump();
-        lastCardInfo = cardContent + dump;
-        sendUidToApi(uid);
     } else if (mode == "WRITE") {
         lastCardInfo = cardContent + "(Mode écriture)";
         writeCard();
