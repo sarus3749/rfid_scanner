@@ -314,6 +314,10 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
             });
             return false;
         }
+        function restartESP() {
+            fetch('/restart')
+                .then(() => { /* la page va se recharger automatiquement */ });
+        }
         loadApiUrl();
         loadWifiConfig();
         loadScanDelay();
