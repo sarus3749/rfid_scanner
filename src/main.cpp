@@ -62,6 +62,10 @@ int apiLogIndex = 0;
 #define WEB_CODE_MAXLEN 16
 String webAccessCode = "admin";
 
+// === Paramètre lecture mémoire activée/désactivée ===
+#define READ_MEMORY_ADDR (WEB_CODE_ADDR + WEB_CODE_MAXLEN)
+bool readMemoryEnabled = true;
+
 // === Prototypes des fonctions ===
 void setup();
 void loop();
@@ -91,6 +95,8 @@ void logApiSend(const String& uid, int httpCode, const String& url);
 void loadWebAccessCode();
 void saveWebAccessCode(const String& code);
 String getCardDump();
+void loadReadMemoryEnabled();
+void saveReadMemoryEnabled(bool enabled);
 
 void setup() {
     Serial.begin(115200);
@@ -125,6 +131,7 @@ void setup() {
     loadWifiConfig();
     loadScanDelay();
     loadWebAccessCode();
+    loadReadMemoryEnabled();
     if (!otaEnabled) {
         WiFi.mode(WIFI_OFF);
     } else {
@@ -247,7 +254,11 @@ void handleRFIDOperations() {
 	blinkBuzzer();
     if (mode == "READ") {
         bool apiSuccess = false;
-        if (piccType == MFRC522::PICC_TYPE_MIFARE_UL) {
+        if (!readMemoryEnabled) {
+            lastCardInfo = cardContent + "<i>Lecture mémoire désactivée</i><br/>";
+            int httpCode = sendUidToApi(uid);
+            apiSuccess = (httpCode == 200);
+        } else if (piccType == MFRC522::PICC_TYPE_MIFARE_UL) {
             Serial.println("--- Lecture MIFARE Ultralight ---");
             String ulDump = "<b>Lecture MIFARE Ultralight :</b><br/>";
             for (byte page = 0; page < 16; page++) {
@@ -944,6 +955,21 @@ void setupWebServer() {
         }
     });
     
+    // API pour activer/désactiver la lecture mémoire RFID
+    webServer.on("/api/readmemory", []() {
+        if (webServer.method() == HTTP_GET) {
+            webServer.send(200, "text/plain", readMemoryEnabled ? "1" : "0");
+        } else if (webServer.method() == HTTP_POST) {
+            if (webServer.hasArg("enabled")) {
+                bool enabled = (webServer.arg("enabled") == "1" || webServer.arg("enabled") == "true");
+                saveReadMemoryEnabled(enabled);
+                webServer.send(200, "text/plain", "OK");
+            } else {
+                webServer.send(400, "text/plain", "Paramètre 'enabled' manquant");
+            }
+        }
+    });
+    
     webServer.begin();
     started = true;
     Serial.print("Serveur web démarré sur IP: ");
@@ -1138,4 +1164,25 @@ void saveWebAccessCode(const String& code) {
     EEPROM.commit();
     EEPROM.end();
     webAccessCode = code;
+}
+
+void loadReadMemoryEnabled() {
+    EEPROM.begin(EEPROM_SIZE);
+    byte val = EEPROM.read(READ_MEMORY_ADDR);
+    if (val == 0xFF) {
+        readMemoryEnabled = true;
+        EEPROM.write(READ_MEMORY_ADDR, 1);
+        EEPROM.commit();
+    } else {
+        readMemoryEnabled = (val != 0);
+    }
+    EEPROM.end();
+}
+
+void saveReadMemoryEnabled(bool enabled) {
+    EEPROM.begin(EEPROM_SIZE);
+    EEPROM.write(READ_MEMORY_ADDR, enabled ? 1 : 0);
+    EEPROM.commit();
+    EEPROM.end();
+    readMemoryEnabled = enabled;
 }

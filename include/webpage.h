@@ -63,6 +63,12 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 <button class='button' onclick='writeData()'>✏️ Écrire</button>
             </div>
             <div class='info'>
+                <h3>🧠 Lecture mémoire RFID</h3>
+                <label for='readMemorySwitch'>Lecture mémoire activée :</label>
+                <input type='checkbox' id='readMemorySwitch' onchange='saveReadMemory()'>
+                <span id='readMemoryStatus'></span>
+            </div>
+            <div class='info'>
                 <h3>⏱️ Délai entre scans RFID</h3>
                 <input type='number' id='scanDelay' min='500' step='100' style='width:120px'> ms <span style='color:#888'>(min 500 ms)</span>
                 <button class='button' onclick='saveScanDelay()'>💾 Enregistrer</button>
@@ -265,6 +271,26 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 setTimeout(()=>{document.getElementById('scanDelayStatus').textContent='';}, 2000);
             });
         }
+        function loadReadMemory() {
+            fetch('/api/readmemory')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('readMemorySwitch').checked = (data === '1');
+                });
+        }
+        function saveReadMemory() {
+            const enabled = document.getElementById('readMemorySwitch').checked ? '1' : '0';
+            fetch('/api/readmemory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'enabled=' + enabled
+            })
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById('readMemoryStatus').textContent = 'Paramètre enregistré!';
+                setTimeout(()=>{document.getElementById('readMemoryStatus').textContent='';}, 2000);
+            });
+        }
         function loadWebCode() {
             fetch('/api/webcode')
                 .then(response => response.text())
@@ -292,6 +318,7 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
         loadWifiConfig();
         loadScanDelay();
         loadWebCode();
+        loadReadMemory();
         setInterval(updateStatus, 5000);
         setInterval(updateCardInfo, 2000);
         setInterval(updateApiTerminal, 2000);
