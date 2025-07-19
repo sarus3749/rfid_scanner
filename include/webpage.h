@@ -8,24 +8,49 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
     <meta charset='utf-8'>
     <meta name='viewport' content='width=device-width, initial-scale=1'>
     <style>
-        body { font-family: Arial; margin: 20px; background: #f0f0f0; }
+        body { font-family: Arial; margin: 10px; background: #f0f0f0; }
         .container { max-width: 840px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .header { text-align: center; color: #333; margin-bottom: 30px; }
-        .tabs { display: flex; border-bottom: 2px solid #e0e0e0; margin-bottom: 20px; }
-        .tab { padding: 12px 32px; cursor: pointer; background: #f7f7f7; border: none; outline: none; font-size: 18px; color: #333; border-radius: 10px 10px 0 0; margin-right: 2px; }
+        .tabs { display: flex; border-bottom: 2px solid #e0e0e0; margin-bottom: 20px; overflow-x: auto; flex-wrap: nowrap; }
+        .tab { padding: 12px 20px; cursor: pointer; background: #f7f7f7; border: none; outline: none; font-size: 16px; color: #333; border-radius: 10px 10px 0 0; margin-right: 2px; white-space: nowrap; flex-shrink: 0; }
         .tab.active { background: #fff; border-bottom: 2px solid #fff; font-weight: bold; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 15px 0; }
-        .button { padding: 12px 24px; margin: 8px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        .button { padding: 10px 16px; margin: 4px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; display: inline-block; }
         .button:hover { background: #45a049; }
         .button.danger { background: #f44336; }
         .button.danger:hover { background: #da190b; }
         .info { background: #e3f2fd; padding: 15px; border-radius: 5px; margin: 15px 0; }
-        input[type=text], input[type=password] { padding: 10px; width: 220px; border: 1px solid #ddd; border-radius: 4px; }
+        input[type=text], input[type=password], input[type=number], select { padding: 8px; width: 100%; max-width: 280px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; margin: 2px 0; }
         .upload-form { background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; }
         .terminal { background: #111; color: #0f0; font-family: monospace; padding: 15px; border-radius: 5px; min-height: 220px; max-height: 320px; overflow-y: auto; margin: 15px 0; }
-        @media (max-width: 900px) { .container { max-width: 98vw; } }
+        .form-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }
+        .form-group { display: flex; flex-direction: column; margin: 8px 0; }
+        .form-group label { margin-bottom: 4px; font-weight: bold; }
+        .inline-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            body { margin: 5px; }
+            .container { max-width: 98vw; padding: 15px; }
+            .header h1 { font-size: 24px; }
+            .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+            .tab { padding: 10px 16px; font-size: 14px; min-width: auto; }
+            .button { padding: 8px 12px; font-size: 13px; margin: 2px; width: auto; min-width: 80px; }
+            input[type=text], input[type=password], input[type=number], select { width: 100%; max-width: none; }
+            .form-row { flex-direction: column; align-items: stretch; }
+            .inline-group { flex-direction: column; align-items: stretch; }
+            .terminal { min-height: 180px; max-height: 250px; font-size: 12px; }
+        }
+        
+        @media (max-width: 480px) {
+            .container { padding: 10px; }
+            .header h1 { font-size: 20px; }
+            .tab { padding: 8px 12px; font-size: 13px; }
+            .button { width: 100%; margin: 2px 0; padding: 12px; }
+            .status, .info, .upload-form { padding: 10px; margin: 10px 0; }
+        }
     </style>
 </head>
 <body>
@@ -55,12 +80,15 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
         <div class='tab-content' id='tab-rfid'>
             <div class='info'>
                 <h3>🎛️ Commandes RFID</h3>
-                <button class='button' onclick='sendCommand("READ")'>📖 Mode Lecture</button>
-                <button class='button' onclick='sendCommand("STOP")'>⏹️ Arrêter</button>
-                <button class='button' onclick='sendCommand("INFO")'>ℹ️ Informations</button>
-                <br><br>
-                <input type='text' id='writeData' placeholder='Données à écrire'>
-                <button class='button' onclick='writeData()'>✏️ Écrire</button>
+                <div class='inline-group'>
+                    <button class='button' onclick='sendCommand("READ")'>📖 Mode Lecture</button>
+                    <button class='button' onclick='sendCommand("STOP")'>⏹️ Arrêter</button>
+                    <button class='button' onclick='sendCommand("INFO")'>ℹ️ Informations</button>
+                </div>
+                <div class='form-row'>
+                    <input type='text' id='writeData' placeholder='Données à écrire'>
+                    <button class='button' onclick='writeData()'>✏️ Écrire</button>
+                </div>
             </div>
             <div class='info'>
                 <h3>🧠 Lecture mémoire RFID</h3>
@@ -70,32 +98,60 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
             </div>
             <div class='info'>
                 <h3>⏱️ Délai entre scans RFID</h3>
-                <input type='number' id='scanDelay' min='500' step='100' style='width:120px'> ms <span style='color:#888'>(min 500 ms)</span>
-                <button class='button' onclick='saveScanDelay()'>💾 Enregistrer</button>
+                <div class='form-row'>
+                    <input type='number' id='scanDelay' min='500' step='100' placeholder='Délai en ms'>
+                    <span style='color:#888; font-size:12px;'>(min 500 ms)</span>
+                    <button class='button' onclick='saveScanDelay()'>💾 Enregistrer</button>
+                </div>
                 <span id='scanDelayStatus'></span>
             </div>
         </div>
         <div class='tab-content' id='tab-config'>
             <div class='info'>
                 <h3>🌐 Configuration API</h3>
-                <input type='text' id='apiUrl' placeholder='URL API' style='width:350px'>
+                <div class='form-group'>
+                    <label for='apiUrl'>URL API :</label>
+                    <input type='text' id='apiUrl' placeholder='URL API'>
+                </div>
                 <button class='button' onclick='saveApiUrl()'>💾 Enregistrer URL</button>
                 <span id='apiUrlStatus'></span>
             </div>
             <div class='info'>
                 <h3>🔑 Configuration WiFi</h3>
-                <input type='text' id='wifiSsid' placeholder='SSID' style='width:180px'>
-                <input type='password' id='wifiPass' placeholder='Mot de passe' style='width:180px'>
+                <button class='button' onclick='scanWifiNetworks()'>📡 Scanner les réseaux</button>
+                <span id='wifiScanStatus'></span>
+                <div id='wifiSelection' style='display:none; margin-top:10px;'>
+                    <div class='form-group'>
+                        <label for='wifiNetworkSelect'>Réseaux détectés :</label>
+                        <select id='wifiNetworkSelect' onchange='selectWifiNetwork()'>
+                            <option value=''>-- Choisir un réseau --</option>
+                        </select>
+                    </div>
+                </div>
+                <div class='form-group'>
+                    <label for='wifiSsid'>SSID :</label>
+                    <input type='text' id='wifiSsid' placeholder='SSID (ou sélectionner ci-dessus)'>
+                </div>
+                <div class='form-group'>
+                    <label for='wifiPass'>Mot de passe :</label>
+                    <input type='password' id='wifiPass' placeholder='Mot de passe'>
+                </div>
                 <button class='button' onclick='saveWifiConfig()'>💾 Enregistrer WiFi</button>
                 <span id='wifiStatus'></span>
             </div>
             <div class='info'>
                 <h3>🔊 Test du buzzer</h3>
                 <button class='button' onclick='buzzerTest()'>Tester le buzzer</button>
-                <label for='buzzerTimes'>Nombre de bips :</label>
-                <input type='number' id='buzzerTimes' value='1' min='1' max='10' style='width:40px;'>
-                <label for='buzzerDuration'>Durée (ms) :</label>
-                <input type='number' id='buzzerDuration' value='100' min='10' max='1000' style='width:60px;'>
+                <div class='form-row'>
+                    <div class='form-group'>
+                        <label for='buzzerTimes'>Nombre de bips :</label>
+                        <input type='number' id='buzzerTimes' value='1' min='1' max='10'>
+                    </div>
+                    <div class='form-group'>
+                        <label for='buzzerDuration'>Durée (ms) :</label>
+                        <input type='number' id='buzzerDuration' value='100' min='10' max='1000'>
+                    </div>
+                </div>
                 <span id='buzzerResult'></span>
             </div>
             <div class='info'>
@@ -115,7 +171,10 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 <h3>🔒 Code d'accès à l'interface web</h3>
                 <p>Code actuel : <span id='webCode'>Chargement...</span></p>
                 <form id='webCodeForm' onsubmit='return changeWebCode();'>
-                    <input type='text' id='newWebCode' placeholder='Nouveau code' maxlength='16' required>
+                    <div class='form-group'>
+                        <label for='newWebCode'>Nouveau code :</label>
+                        <input type='text' id='newWebCode' placeholder='Nouveau code' maxlength='16' required>
+                    </div>
                     <button class='button' type='submit'>💾 Modifier le code</button>
                     <span id='webCodeStatus'></span>
                 </form>
@@ -250,6 +309,38 @@ const char WEB_PAGE[] PROGMEM = R"rawliteral(
                 document.getElementById('wifiStatus').textContent = 'WiFi enregistré!';
                 setTimeout(()=>{document.getElementById('wifiStatus').textContent='';}, 2000);
             });
+        }
+        function scanWifiNetworks() {
+            document.getElementById('wifiScanStatus').textContent = 'Scan en cours...';
+            fetch('/api/wifiscan')
+                .then(response => response.json())
+                .then(networks => {
+                    const select = document.getElementById('wifiNetworkSelect');
+                    // Effacer les options existantes
+                    select.innerHTML = '<option value="">-- Choisir un réseau --</option>';
+                    
+                    // Ajouter les réseaux trouvés
+                    networks.forEach(network => {
+                        const option = document.createElement('option');
+                        option.value = network.ssid;
+                        option.textContent = `${network.ssid} (${network.rssi} dBm) ${network.secure ? '🔒' : '🔓'}`;
+                        select.appendChild(option);
+                    });
+                    
+                    document.getElementById('wifiSelection').style.display = 'block';
+                    document.getElementById('wifiScanStatus').textContent = `${networks.length} réseaux trouvés`;
+                    setTimeout(()=>{document.getElementById('wifiScanStatus').textContent='';}, 3000);
+                })
+                .catch(error => {
+                    document.getElementById('wifiScanStatus').textContent = 'Erreur lors du scan';
+                    setTimeout(()=>{document.getElementById('wifiScanStatus').textContent='';}, 3000);
+                });
+        }
+        function selectWifiNetwork() {
+            const selectedSSID = document.getElementById('wifiNetworkSelect').value;
+            if (selectedSSID) {
+                document.getElementById('wifiSsid').value = selectedSSID;
+            }
         }
         function loadScanDelay() {
             fetch('/api/scandelay')

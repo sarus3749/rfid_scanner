@@ -19,6 +19,7 @@
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
 #include <EEPROM.h>
+#include <DNSServer.h>        // Pour le portail captif
 #include <webpage.h>
 #include <login_page.h>
 
@@ -27,6 +28,8 @@
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 MFRC522::MIFARE_Key key;
 ESP8266WebServer webServer(80);
+DNSServer dnsServer;         // Serveur DNS pour portail captif
+const byte DNS_PORT = 53;
 
 // Variables globales
 String mode = "READ"; // READ, WRITE
@@ -168,7 +171,17 @@ void loop() {
     }
     // Toujours gérer le serveur web, même en AP
     webServer.handleClient();
-    delay(100);
+    
+    // Gestion du DNS captif en mode AP
+    if (WiFi.getMode() == WIFI_AP) {
+        dnsServer.processNextRequest();
+    }
+    
+    // Délai réduit pour améliorer la réactivité du serveur web
+    delay(10); // Réduit de 100ms à 10ms
+    
+    // Permettre au watchdog de se réinitialiser
+    yield();
 }
 
 void handleSerialCommands() {
@@ -293,6 +306,12 @@ void handleRFIDOperations() {
                 if (page < 4) {
                     ulDump += "Page " + String(page) + ": " + hexStr + " | " + txtStr + "<br/>";
                 }
+                
+                // Permettre au serveur web de répondre pendant la lecture RFID
+                if (page % 4 == 0) {
+                    webServer.handleClient();
+                    yield();
+                }
             }
             ulDump += "<i>Pages suivantes affichées uniquement sur le port série.</i><br/>";
             lastCardInfo = cardContent + ulDump;
@@ -409,6 +428,10 @@ String getCardDump() {
             if (sector < 3) {
                 sectorDump += "&nbsp;&nbsp;Bloc " + String(blockAddr) + ": " + hexStr + " | " + txtStr + "<br/>";
             }
+            
+            // Permettre au serveur web de répondre pendant la lecture des secteurs
+            webServer.handleClient();
+            yield();
         }
     }
     sectorDump += "<i>Secteurs suivants affichés uniquement sur le port série.</i><br/>";
@@ -657,17 +680,24 @@ void connectToWiFi() {
         // Attendre que le serveur web et mDNS soient prêts avant d'allumer la LED
         delay(200); // Laisser le temps au WiFi
         setupWebServer();
+        
+        // Configuration mDNS (uniquement en mode station)
         bool mdnsReady = false;
         for (int i = 0; i < 10; i++) { // Attendre jusqu'à 2s max
             if (MDNS.begin(HOSTNAME)) {
                 mdnsReady = true;
+                Serial.println("mDNS démarré avec succès");
+                Serial.println("Accès possible via: http://" + String(HOSTNAME) + ".local");
                 break;
             }
             delay(200);
         }
         if (mdnsReady) {
             MDNS.addService("http", "tcp", 80);
+        } else {
+            Serial.println("Échec démarrage mDNS - accès par IP uniquement");
         }
+        
         digitalWrite(LED_PIN, LOW); // Allume la LED (inversée sur ESP8266)
     } else {
         Serial.println();
@@ -680,11 +710,28 @@ void connectToWiFi() {
 
 void startConfigAP() {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASS);
+    
+    // Configuration IP statique pour l'AP (améliore la compatibilité smartphone)
+    IPAddress local_ip(192, 168, 4, 1);
+    IPAddress gateway(192, 168, 4, 1);
+    IPAddress subnet(255, 255, 255, 0);
+    WiFi.softAPConfig(local_ip, gateway, subnet);
+    
+    // Configuration AP avec canal spécifique et paramètres optimisés
+    WiFi.softAP(AP_SSID, AP_PASS, 1, 0, 4); // Canal 1, pas de SSID caché, max 4 connexions
+    
+    // Configuration du serveur DNS captif
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    dnsServer.start(DNS_PORT, "*", local_ip); // Rediriger toutes les requêtes DNS vers notre IP
+    
     Serial.print("AP de configuration démarré. SSID: ");
     Serial.println(AP_SSID);
     Serial.print("IP: ");
     Serial.println(WiFi.softAPIP());
+    Serial.print("Canal: 1, Connexions max: 4");
+    Serial.println();
+    Serial.println("DNS captif démarré - toutes les requêtes pointent vers 192.168.4.1");
+    
     setupWebServer(); // Démarre le serveur web en mode AP
 }
 
@@ -733,12 +780,6 @@ void setupOTA() {
     });
     ArduinoOTA.begin();
     
-    // Configuration mDNS
-    if (MDNS.begin(HOSTNAME)) {
-        Serial.println("mDNS démarré");
-        MDNS.addService("http", "tcp", 80);
-    }
-    
     // Configuration serveur web pour interface OTA
     setupWebServer();
     
@@ -756,6 +797,40 @@ void setupOTA() {
 void setupWebServer() {
     static bool started = false;
     if (started) return;
+    
+    // Routes pour portail captif (compatibilité smartphone étendue)
+    webServer.on("/generate_204", []() {
+        webServer.sendHeader("Location", "http://192.168.4.1/", true);
+        webServer.send(302, "text/plain", "");
+    });
+    webServer.on("/fwlink", []() {
+        webServer.sendHeader("Location", "http://192.168.4.1/", true);
+        webServer.send(302, "text/plain", "");
+    });
+    webServer.on("/connecttest.txt", []() {
+        webServer.send(200, "text/plain", "Microsoft Connect Test");
+    });
+    webServer.on("/wpad.dat", []() {
+        webServer.send(404, "text/plain", "");
+    });
+    
+    // Routes supplémentaires pour différents types de smartphones
+    webServer.on("/hotspot-detect.html", []() {
+        webServer.sendHeader("Location", "http://192.168.4.1/", true);
+        webServer.send(302, "text/html", "");
+    });
+    webServer.on("/library/test/success.html", []() {
+        webServer.sendHeader("Location", "http://192.168.4.1/", true);
+        webServer.send(302, "text/html", "");
+    });
+    webServer.on("/kindle-wifi/redirect.html", []() {
+        webServer.sendHeader("Location", "http://192.168.4.1/", true);
+        webServer.send(302, "text/html", "");
+    });
+    webServer.on("/success.txt", []() {
+        webServer.send(200, "text/plain", "success");
+    });
+    
     // Page principale protégée par code
     webServer.on("/", HTTP_GET, []() {
         if (!webServer.hasArg("code") || webServer.arg("code") != webAccessCode) {
@@ -814,11 +889,17 @@ void setupWebServer() {
         }
     });
     webServer.on("/api/status", []() {
-        String json = "{";
-        json += "\"mode\":\"" + mode + "\",";
-        json += "\"memory\":" + String(ESP.getFreeHeap()) + ",";
-        json += "\"uptime\":" + String(millis() / 1000) + ",";
-        json += "\"rssi\":" + String(WiFi.RSSI());
+        // Construction optimisée du JSON pour éviter la fragmentation mémoire
+        String json;
+        json.reserve(150); // Réserver la mémoire à l'avance
+        json = "{\"mode\":\"";
+        json += mode;
+        json += "\",\"memory\":";
+        json += ESP.getFreeHeap();
+        json += ",\"uptime\":";
+        json += millis() / 1000;
+        json += ",\"rssi\":";
+        json += WiFi.RSSI();
         json += "}";
         webServer.send(200, "application/json", json);
     });
@@ -871,30 +952,43 @@ void setupWebServer() {
         }
     });
     
-    // API pour l'historique des envois à l'API
+    // API pour l'historique des envois à l'API (optimisée)
     webServer.on("/api/apilog", []() {
-        String json = "[";
+        String json;
+        json.reserve(1024); // Réserver mémoire pour éviter la fragmentation
+        json = "[";
         int count = 0;
         // Afficher les entrées dans l'ordre chronologique (de la plus ancienne à la plus récente)
         for (int i = 0; i < API_LOG_SIZE; i++) {
             int idx = (apiLogIndex + i) % API_LOG_SIZE;
             if (apiLog[idx].uid.length() == 0) continue;
             if (count > 0) json += ",";
-            json += "{\"t\":" + String(apiLog[idx].timestamp)
-                + ",\"uid\":\"" + apiLog[idx].uid
-                + "\",\"code\":" + String(apiLog[idx].httpCode)
-                + ",\"url\":\"" + apiLog[idx].url + "\"}";
+            
+            // Construction optimisée de l'objet JSON
+            json += "{\"t\":";
+            json += apiLog[idx].timestamp;
+            json += ",\"uid\":\"";
+            json += apiLog[idx].uid;
+            json += "\",\"code\":";
+            json += apiLog[idx].httpCode;
+            json += ",\"url\":\"";
+            json += apiLog[idx].url;
+            json += "\"}";
             count++;
+            
+            // Permettre au système de respirer pendant la construction
+            if (count % 5 == 0) yield();
         }
         json += "]";
         webServer.send(200, "application/json", json);
     });
     
-    // Redémarrage
+    // Redémarrage (optimisé pour éviter le délai bloquant)
     webServer.on("/restart", []() {
         webServer.send(200, "text/html", "<h1>Redémarrage en cours...</h1><script>setTimeout(function(){location.href='/';}, 10000);</script>");
-        delay(1000);
-        ESP.restart();
+        webServer.handleClient(); // S'assurer que la réponse est envoyée
+        yield();
+        ESP.restart(); // Redémarrage immédiat sans délai
     });
     
     // Gestion de la mise à jour OTA via web
@@ -924,7 +1018,7 @@ void setupWebServer() {
         }
     });
     
-    // API pour faire clignoter le buzzer
+    // API pour faire clignoter le buzzer (version non-bloquante)
     webServer.on("/api/buzzer", []() {
         int times = 1;
         int duration = 100;
@@ -932,12 +1026,10 @@ void setupWebServer() {
         if (webServer.hasArg("duration")) duration = webServer.arg("duration").toInt();
         if (times < 1) times = 1;
         if (duration < 10) duration = 10;
-        for (int i = 0; i < times; i++) {
-            digitalWrite(BUZZER_PIN, HIGH);
-            delay(duration);
-            digitalWrite(BUZZER_PIN, LOW);
-            delay(duration);
-        }
+        
+        // Version non-bloquante : utilise la fonction existante
+        blinkBuzzer(times, duration);
+        
         webServer.send(200, "text/plain", "Buzzer OK");
     });
     
@@ -967,6 +1059,59 @@ void setupWebServer() {
             } else {
                 webServer.send(400, "text/plain", "Paramètre 'enabled' manquant");
             }
+        }
+    });
+    
+    // API pour scanner les réseaux WiFi disponibles
+    webServer.on("/api/wifiscan", []() {
+        Serial.println("[WiFi] Début du scan des réseaux...");
+        int n = WiFi.scanNetworks();
+        String json;
+        json.reserve(512); // Réserver mémoire pour éviter la fragmentation
+        json = "[";
+        
+        if (n > 0) {
+            for (int i = 0; i < n; i++) {
+                if (i > 0) json += ",";
+                json += "{\"ssid\":\"";
+                json += WiFi.SSID(i);
+                json += "\",\"rssi\":";
+                json += WiFi.RSSI(i);
+                json += ",\"secure\":";
+                json += (WiFi.encryptionType(i) == ENC_TYPE_NONE) ? "false" : "true";
+                json += "}";
+                
+                // Permettre au système de respirer
+                if (i % 3 == 0) {
+                    webServer.handleClient();
+                    yield();
+                }
+            }
+        }
+        json += "]";
+        
+        Serial.printf("[WiFi] Scan terminé : %d réseaux trouvés\n", n);
+        WiFi.scanDelete(); // Libérer la mémoire du scan
+        webServer.send(200, "application/json", json);
+    });
+    
+    // Gestionnaire catch-all amélioré pour portail captif
+    webServer.onNotFound([]() {
+        if (WiFi.getMode() == WIFI_AP) {
+            // En mode AP, rediriger vers la page de connexion
+            String message = "<!DOCTYPE html><html><head>";
+            message += "<meta charset='utf-8'>";
+            message += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+            message += "<title>Configuration RFID Scanner</title>";
+            message += "<script>setTimeout(function(){window.location.href='http://192.168.4.1/';}, 1000);</script>";
+            message += "</head><body>";
+            message += "<h1>Configuration RFID Scanner</h1>";
+            message += "<p>Redirection automatique...</p>";
+            message += "<p><a href='http://192.168.4.1/'>Cliquez ici si la redirection ne fonctionne pas</a></p>";
+            message += "</body></html>";
+            webServer.send(200, "text/html", message);
+        } else {
+            webServer.send(404, "text/plain", "Page non trouvée");
         }
     });
     
@@ -1078,13 +1223,28 @@ void saveScanDelay(unsigned long val) {
     scanDelayMs = val;
 }
 
-// Fonction pour faire clignoter la LED
+// Fonction pour faire clignoter le buzzer (optimisée pour la réactivité web)
 void blinkBuzzer(int times, int duration) {
     for (int i = 0; i < times; i++) {
         digitalWrite(BUZZER_PIN, HIGH);
-        delay(duration);
+        
+        // Délai fractionné pour permettre au serveur web de répondre
+        unsigned long start = millis();
+        while (millis() - start < duration) {
+            webServer.handleClient(); // Traiter les requêtes pendant le délai
+            yield(); // Permettre au système de respirer
+            delay(1);
+        }
+        
         digitalWrite(BUZZER_PIN, LOW);
-        delay(duration);
+        
+        // Même chose pour le délai d'arrêt
+        start = millis();
+        while (millis() - start < duration) {
+            webServer.handleClient();
+            yield();
+            delay(1);
+        }
     }
 }
 
