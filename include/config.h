@@ -1,4 +1,3 @@
-
 #define OTA_PASSWORD "password123"
 #define HOSTNAME "RFID-SCANNER"
 
@@ -14,11 +13,10 @@
 #define BUZZER_PIN D2 // GPIO 4  (D2)
 #define LED_PIN    D4 // GPIO 2  (D4)
 
-#define EEPROM_SIZE 256
-#define API_URL_ADDR 0
-#define API_URL_MAXLEN 200
-
-#define EEPROM_SIZE 256
+// Plan mémoire EEPROM (émulée en flash). La suite (délai de scan, code web,
+// lecture mémoire) est définie dans main.cpp à la suite du mot de passe WiFi.
+// 512 octets : la disposition complète occupe 317 octets.
+#define EEPROM_SIZE 512
 #define API_URL_ADDR 0
 #define API_URL_MAXLEN 200
 #define WIFI_SSID_ADDR (API_URL_ADDR + API_URL_MAXLEN)
