@@ -10,6 +10,7 @@
  */
 #include <config.h>
 #include <Arduino.h>
+#include <memory>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ESP8266WiFi.h>
@@ -18,6 +19,7 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <EEPROM.h>
 #include <DNSServer.h>        // Pour le portail captif
 #include <webpage.h>
@@ -69,6 +71,8 @@ String webAccessCode = "admin";
 #define READ_MEMORY_ADDR (WEB_CODE_ADDR + WEB_CODE_MAXLEN)
 bool readMemoryEnabled = true;
 
+static_assert(READ_MEMORY_ADDR < EEPROM_SIZE, "EEPROM_SIZE trop petit pour la disposition EEPROM");
+
 // === Prototypes des fonctions ===
 void setup();
 void loop();
@@ -79,9 +83,6 @@ void writeCard();
 void formatCard();
 void backupCard();
 void showSystemInfo();
-void printHex(byte *buffer, byte bufferSize);
-void printText(byte *buffer, byte bufferSize);
-void testRFIDModule();
 void connectToWiFi();
 void setupOTA();
 void setupWebServer();
@@ -441,8 +442,7 @@ String getCardDump() {
 void writeCard() {
     Serial.println("--- Écriture des données ---");
     
-    byte sector = 1;
-    byte blockAddr = 4;
+    byte blockAddr = 4; // Secteur 1, bloc 0
     byte buffer[16];
     
     // Préparation des données
@@ -611,44 +611,6 @@ void showSystemInfo() {
     Serial.println("============================\n");
 }
 
-// Fonction utilitaire pour afficher les données en hexadécimal
-void printHex(byte *buffer, byte bufferSize) {
-    for (byte i = 0; i < bufferSize; i++) {
-        Serial.print(buffer[i] < 0x10 ? " 0" : " ");
-        Serial.print(buffer[i], HEX);
-    }
-}
-
-// Fonction utilitaire pour afficher les données en texte
-void printText(byte *buffer, byte bufferSize) {
-    for (byte i = 0; i < bufferSize; i++) {
-        if (buffer[i] >= 32 && buffer[i] <= 126) {
-            Serial.print((char)buffer[i]);
-        } else {
-            Serial.print(".");
-        }
-    }
-}
-
-// Fonction de test de connectivité
-void testRFIDModule() {
-    Serial.println("=== Test du module RFID ===");
-    
-    // Test de communication SPI
-    byte version = mfrc522.PCD_ReadRegister(MFRC522::VersionReg);
-    Serial.print("Version du firmware: 0x");
-    Serial.println(version, HEX);
-    
-    if (version == 0x00 || version == 0xFF) {
-        Serial.println("ERREUR: Aucune communication avec le module RC522!");
-        Serial.println("Vérifiez les connexions SPI.");
-    } else {
-        Serial.println("Module RC522 détecté et fonctionnel.");
-    }
-    
-    Serial.println("===========================\n");
-}
-
 // Fonction de connexion WiFi
 void connectToWiFi() {
     loadWifiConfig();
@@ -661,12 +623,10 @@ void connectToWiFi() {
     Serial.println(wifiSsid);
     WiFi.mode(WIFI_STA);
     WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
-    int attempts = 0;
     unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED && (millis() - start) < 20000) {
         delay(500);
         Serial.print(".");
-        attempts++;
     }
     if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
@@ -1126,8 +1086,10 @@ void loadApiUrl() {
     EEPROM.begin(EEPROM_SIZE);
     char buf[API_URL_MAXLEN+1];
     for (int i = 0; i < API_URL_MAXLEN; i++) {
-        buf[i] = EEPROM.read(API_URL_ADDR + i);
-        if (buf[i] == '\0') break;
+        byte b = EEPROM.read(API_URL_ADDR + i);
+        if (b == 0xFF) b = 0; // EEPROM vierge
+        buf[i] = b;
+        if (b == 0) break;
     }
     buf[API_URL_MAXLEN] = '\0';
     apiUrl = String(buf);
@@ -1254,17 +1216,18 @@ int sendUidToApi(const String& uid) {
     Serial.println("[API] Préparation envoi UID: " + uid + " vers " + url);
     int httpCode = -1;
     if (WiFi.status() == WL_CONNECTED && url.startsWith("http")) {
-        HTTPClient http;
-        bool beginOk = false;
+        // Le client doit vivre aussi longtemps que la requête HTTP :
+        // http.begin() ne fait que garder une référence vers lui.
+        std::unique_ptr<WiFiClient> client;
         if (url.startsWith("https://")) {
-            #include <WiFiClientSecure.h>
-            WiFiClientSecure client;
-            client.setInsecure();
-            beginOk = http.begin(client, url);
+            WiFiClientSecure* secureClient = new WiFiClientSecure();
+            secureClient->setInsecure(); // Certificat serveur non vérifié
+            client.reset(secureClient);
         } else {
-            WiFiClient client;
-            beginOk = http.begin(client, url);
+            client.reset(new WiFiClient());
         }
+        HTTPClient http;
+        bool beginOk = http.begin(*client, url);
         if (!beginOk) {
             Serial.println("[API] Erreur http.begin()");
             logApiSend(uid, -2, url);
@@ -1305,8 +1268,10 @@ void loadWebAccessCode() {
     EEPROM.begin(EEPROM_SIZE);
     char buf[WEB_CODE_MAXLEN+1];
     for (int i = 0; i < WEB_CODE_MAXLEN; i++) {
-        buf[i] = EEPROM.read(WEB_CODE_ADDR + i);
-        if (buf[i] == '\0') break;
+        byte b = EEPROM.read(WEB_CODE_ADDR + i);
+        if (b == 0xFF) b = 0; // EEPROM vierge
+        buf[i] = b;
+        if (b == 0) break;
     }
     buf[WEB_CODE_MAXLEN] = '\0';
     webAccessCode = String(buf);
