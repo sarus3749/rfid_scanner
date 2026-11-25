@@ -18,67 +18,85 @@ Firmware PlatformIO pour un lecteur de badges RFID/NFC autonome, construit autou
 
 ## Câblage
 
-Le RC522 est alimenté en **3,3 V** par le D1 Mini et relié au bus SPI matériel. Le buzzer et la LED sont optionnels.
+Le D1 Mini est alimenté en **5 V** par son port USB et fournit le **3,3 V** du RC522 par sa broche 3V3, avec une **masse commune**. Le RC522 est relié au bus SPI matériel. Le buzzer est optionnel.
 
 ```mermaid
 flowchart LR
-    USB["USB 5 V"]
+    USB["Alimentation USB 5 V<br/>(≥ 500 mA)"]
     D1["Wemos D1 Mini<br/>(ESP8266)"]
     RC["Module RC522"]
-    BUZ["Buzzer actif"]
-    LED["LED intégrée<br/>(D4)"]
+    BUZ["Buzzer actif<br/>(optionnel)"]
 
-    USB -- "5 V" --> D1
-    D1 -- "3,3 V / GND" --> RC
-    D1 -- "SPI : D5 SCK, D6 MISO, D7 MOSI" --> RC
+    USB -- "+5 V" --> D1
+    D1 -- "3V3 → 3.3V" --> RC
     D1 -- "D8 → SDA (SS)" --> RC
+    D1 -- "D5 → SCK, D7 → MOSI" --> RC
+    RC -- "MISO → D6" --> D1
     D1 -- "D3 → RST" --> RC
-    D1 -- "D2" --> BUZ
-    D1 -. "D4" .- LED
+    D1 -- "D2 → + du buzzer" --> BUZ
+    D1 -. "GND commun" .- RC
+    D1 -. "GND commun" .- BUZ
 ```
 
 Vue détaillée :
 
 ```
-   Wemos D1 Mini                         RC522
-  ┌─────────────┐                     ┌──────────┐
-  │        3V3  ├─────────────────────┤ 3.3V     │
-  │        GND  ├──────────┬──────────┤ GND      │
-  │   D3 GPIO0  ├──────────┼──────────┤ RST      │
-  │  D8 GPIO15  ├──────────┼──────────┤ SDA (SS) │
-  │  D5 GPIO14  ├──────────┼──────────┤ SCK      │
-  │  D7 GPIO13  ├──────────┼──────────┤ MOSI     │
-  │  D6 GPIO12  ├──────────┼──────────┤ MISO     │
-  │             │          │          │ IRQ      │ (non connecté)
-  │   D2 GPIO4  ├───┐      │          └──────────┘
-  └─────────────┘   │      │
-                  ┌─┴──────┴─┐
-                  │  Buzzer  │  (+ sur D2, − sur GND)
-                  └──────────┘
+ USB 5 V ──► D1 Mini (régulateur 3,3 V intégré)
+
+  D1 Mini 3V3 ──────────────────────────────────────────► RC522 3.3V
+  D1 Mini GND ──┬───────────────────────────────────────► RC522 GND
+                └───────────────────────────────────────► Buzzer, −
+
+  D1 Mini D8 (GPIO15) ──────────────────────────────────► RC522 SDA (SS)
+  D1 Mini D5 (GPIO14) ──────────────────────────────────► RC522 SCK
+  D1 Mini D7 (GPIO13) ──────────────────────────────────► RC522 MOSI
+  D1 Mini D6 (GPIO12) ◄────────────────────────────────── RC522 MISO
+  D1 Mini D3 (GPIO0)  ──────────────────────────────────► RC522 RST
+                                                          RC522 IRQ (non connecté)
+
+  D1 Mini D2 (GPIO4)  ──────────────────────────────────► Buzzer, +
+  D1 Mini D4 (GPIO2)  ── LED intégrée (allumée quand le WiFi est connecté)
 ```
 
-| RC522 | D1 Mini | GPIO | Remarque |
-|---|---|---|---|
-| 3.3V | 3V3 | | **Jamais 5 V** sur le RC522 |
-| GND | GND | | |
-| RST | D3 | 0 | |
-| SDA (SS) | D8 | 15 | |
-| SCK | D5 | 14 | SPI matériel |
-| MOSI | D7 | 13 | SPI matériel |
-| MISO | D6 | 12 | SPI matériel |
-| IRQ | | | Non utilisé |
+Brochage du D1 Mini, vu côté composants, antenne en haut :
 
-| Autre | D1 Mini | GPIO | Remarque |
-|---|---|---|---|
-| Buzzer actif (+) | D2 | 4 | Le − à la masse |
-| LED | D4 | 2 | LED intégrée du D1 Mini, allumée une fois le WiFi connecté |
+```
+  ┌───────────────────────────┐
+  │  ≈≈≈≈≈≈≈ antenne ≈≈≈≈≈≈≈  │
+  │                           │
+  │  RST ●             ● TX   │
+  │   A0 ●             ● RX   │
+  │   D0 ●             ● D1   │
+  │   D5 ●  SCK        ● D2   │  buzzer
+  │   D6 ●  MISO       ● D3   │  RST
+  │   D7 ●  MOSI       ● D4   │  LED
+  │   D8 ●  SDA        ● GND  │
+  │  3V3 ●             ● 5V   │
+  │                           │
+  │          [ USB ]          │
+  └───────────────────────────┘
+```
+
+| D1 Mini | Relié à | Remarque |
+|---|---|---|
+| 3V3 | RC522 3.3V | **Jamais 5 V** sur le RC522 |
+| GND | RC522 GND, buzzer − | Masse commune |
+| D8 (GPIO15) | RC522 SDA (SS) | |
+| D5 (GPIO14) | RC522 SCK | SPI matériel |
+| D7 (GPIO13) | RC522 MOSI | SPI matériel |
+| D6 (GPIO12) | RC522 MISO | SPI matériel |
+| D3 (GPIO0) | RC522 RST | |
+| D2 (GPIO4) | buzzer actif + | Optionnel |
+| D4 (GPIO2) | LED intégrée | Rien à câbler |
+| — | RC522 IRQ | Non connecté |
 
 Les broches se changent dans [`include/config.h`](include/config.h).
 
 Conseils :
 
-- D3 (GPIO0) et D8 (GPIO15) sont des broches de démarrage de l'ESP8266. Avec un RC522 standard cela ne pose pas de problème, mais si le D1 Mini refuse de démarrer quand le module est branché, vérifiez d'abord le câblage de RST et SDA.
-- La portée est de 2 à 3 cm : présentez le badge à plat, au centre de l'antenne.
+- D3 (GPIO0) et D8 (GPIO15) sont des broches de démarrage de l'ESP8266 : GPIO0 doit être à l'état haut et GPIO15 à l'état bas au démarrage. Avec un RC522 standard cela ne pose pas de problème, mais si le D1 Mini refuse de démarrer quand le module est branché, vérifiez d'abord le câblage de RST et SDA.
+- Un **buzzer actif** (qui sonne dès qu'il est alimenté) est nécessaire : un buzzer passif resterait muet, le firmware ne génère pas de fréquence.
+- La portée est de 2 à 3 cm : présentez le badge à plat, au centre de l'antenne. Éloignez l'antenne de toute surface métallique.
 
 ## Installation
 
