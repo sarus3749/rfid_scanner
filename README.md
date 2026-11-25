@@ -14,62 +14,9 @@ Ce programme permet de lire et écrire des tags RFID/NFC avec un ESP8266 D1 Mini
 
 Le D1 Mini est alimenté en **5 V** par son port USB et fournit le **3,3 V** du RC522 par sa broche 3V3, avec une **masse commune**. Le RC522 est relié au bus SPI matériel. Le buzzer est optionnel.
 
-```mermaid
-flowchart LR
-    USB["Alimentation USB 5 V<br/>(≥ 500 mA)"]
-    D1["Wemos D1 Mini<br/>(ESP8266)"]
-    RC["Module RC522"]
-    BUZ["Buzzer actif<br/>(optionnel)"]
+![Schéma de câblage D1 Mini ↔ RC522 + buzzer](docs/schema-cablage-d1mini-rc522.svg)
 
-    USB -- "+5 V" --> D1
-    D1 -- "3V3 → 3.3V" --> RC
-    D1 -- "D8 → SDA (SS)" --> RC
-    D1 -- "D5 → SCK, D7 → MOSI" --> RC
-    RC -- "MISO → D6" --> D1
-    D1 -- "D3 → RST" --> RC
-    D1 -- "D2 → + du buzzer" --> BUZ
-    D1 -. "GND commun" .- RC
-    D1 -. "GND commun" .- BUZ
-```
-
-Vue détaillée :
-
-```
- USB 5 V ──► D1 Mini (régulateur 3,3 V intégré)
-
-  D1 Mini 3V3 ──────────────────────────────────────────► RC522 3.3V
-  D1 Mini GND ──┬───────────────────────────────────────► RC522 GND
-                └───────────────────────────────────────► Buzzer, −
-
-  D1 Mini D8 (GPIO15) ──────────────────────────────────► RC522 SDA (SS)
-  D1 Mini D5 (GPIO14) ──────────────────────────────────► RC522 SCK
-  D1 Mini D7 (GPIO13) ──────────────────────────────────► RC522 MOSI
-  D1 Mini D6 (GPIO12) ◄────────────────────────────────── RC522 MISO
-  D1 Mini D3 (GPIO0)  ──────────────────────────────────► RC522 RST
-                                                          RC522 IRQ (non connecté)
-
-  D1 Mini D2 (GPIO4)  ──────────────────────────────────► Buzzer, +
-  D1 Mini D4 (GPIO2)  ── LED intégrée (allumée quand le WiFi est connecté)
-```
-
-Brochage du D1 Mini, vu côté composants, antenne en haut :
-
-```
-  ┌───────────────────────────┐
-  │  ≈≈≈≈≈≈≈ antenne ≈≈≈≈≈≈≈  │
-  │                           │
-  │  RST ●             ● TX   │
-  │   A0 ●             ● RX   │
-  │   D0 ●             ● D1   │
-  │   D5 ●  SCK        ● D2   │  buzzer
-  │   D6 ●  MISO       ● D3   │  RST
-  │   D7 ●  MOSI       ● D4   │  LED
-  │   D8 ●  SDA        ● GND  │
-  │  3V3 ●             ● 5V   │
-  │                           │
-  │          [ USB ]          │
-  └───────────────────────────┘
-```
+(version PNG : [`docs/schema-cablage-d1mini-rc522.png`](docs/schema-cablage-d1mini-rc522.png))
 
 | D1 Mini | Relié à | Remarque |
 |---|---|---|
