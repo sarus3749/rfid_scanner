@@ -22,40 +22,45 @@ Le D1 Mini est alimenté en **5 V** par son port USB et fournit le **3,3 V** du 
 
 ```mermaid
 flowchart LR
-    USB["Alimentation USB 5 V<br/>(≥ 500 mA)"]
-    D1["Wemos D1 Mini<br/>(ESP8266)"]
+    ALIM["Alimentation USB 5 V<br/>(≥ 500 mA)"]
+    D1["Wemos D1 Mini<br/>(régulateur 3,3 V intégré)"]
+    C1["Condensateur<br/>10 µF (optionnel)"]
     RC["Module RC522"]
     BUZ["Buzzer actif<br/>(optionnel)"]
 
-    USB -- "+5 V" --> D1
+    ALIM -- "+5 V → 5V" --> D1
     D1 -- "3V3 → 3.3V" --> RC
-    D1 -- "D8 → SDA (SS)" --> RC
-    D1 -- "D5 → SCK, D7 → MOSI" --> RC
+    D1 -- "3V3" --> C1
+    D1 -- "D8 → SDA, D5 → SCK<br/>D7 → MOSI, D3 → RST" --> RC
     RC -- "MISO → D6" --> D1
-    D1 -- "D3 → RST" --> RC
-    D1 -- "D2 → + du buzzer" --> BUZ
-    D1 -. "GND commun" .- RC
-    D1 -. "GND commun" .- BUZ
+    D1 -- "D2 → +" --> BUZ
+    D1 -. "GND commun<br/>(RC522, buzzer −)" .- RC
 ```
 
 Vue détaillée :
 
 ```
- USB 5 V ──► D1 Mini (régulateur 3,3 V intégré)
+ Alim USB 5 V (≥ 500 mA)
+  +5 V ──────────────────────────────────────────────────► D1 Mini, 5V (ou prise USB)
 
-  D1 Mini 3V3 ──────────────────────────────────────────► RC522 3.3V
-  D1 Mini GND ──┬───────────────────────────────────────► RC522 GND
-                └───────────────────────────────────────► Buzzer, −
+         ┌──────────────┐
+         │   D1 Mini    │ 3,3 V ──┬──────────────────────► RC522, 3.3V
+         │ (régulateur  │         │
+         │  intégré)    │        ═══ 10 µF
+         └┬─────────────┘         │   (près du RC522, optionnel)
+          │                       │
+  GND ────┴───────────────────────┴──┬───────────────────► RC522, GND
+                                     └───────────────────► Buzzer, −
 
-  D1 Mini D8 (GPIO15) ──────────────────────────────────► RC522 SDA (SS)
-  D1 Mini D5 (GPIO14) ──────────────────────────────────► RC522 SCK
-  D1 Mini D7 (GPIO13) ──────────────────────────────────► RC522 MOSI
-  D1 Mini D6 (GPIO12) ◄────────────────────────────────── RC522 MISO
-  D1 Mini D3 (GPIO0)  ──────────────────────────────────► RC522 RST
-                                                          RC522 IRQ (non connecté)
+  D1 Mini D8 (GPIO15) ───────────────────────────────────► RC522, SDA (SS)
+  D1 Mini D5 (GPIO14) ───────────────────────────────────► RC522, SCK
+  D1 Mini D7 (GPIO13) ───────────────────────────────────► RC522, MOSI
+  D1 Mini D6 (GPIO12) ◄─────────────────────────────────── RC522, MISO
+  D1 Mini D3 (GPIO0)  ───────────────────────────────────► RC522, RST
+                                                           RC522, IRQ (libre)
 
-  D1 Mini D2 (GPIO4)  ──────────────────────────────────► Buzzer, +
-  D1 Mini D4 (GPIO2)  ── LED intégrée (allumée quand le WiFi est connecté)
+  D1 Mini D2 (GPIO4)  ───────────────────────────────────► Buzzer, +
+  D1 Mini D4 (GPIO2)  ─── LED intégrée (allumée quand le WiFi est connecté)
 ```
 
 Brochage du D1 Mini, vu côté composants, antenne en haut :
@@ -96,6 +101,7 @@ Conseils :
 
 - D3 (GPIO0) et D8 (GPIO15) sont des broches de démarrage de l'ESP8266 : GPIO0 doit être à l'état haut et GPIO15 à l'état bas au démarrage. Avec un RC522 standard cela ne pose pas de problème, mais si le D1 Mini refuse de démarrer quand le module est branché, vérifiez d'abord le câblage de RST et SDA.
 - Un **buzzer actif** (qui sonne dès qu'il est alimenté) est nécessaire : un buzzer passif resterait muet, le firmware ne génère pas de fréquence.
+- Un **condensateur de 10 µF** entre 3,3 V et GND, au plus près du RC522, stabilise son alimentation si les lectures sont capricieuses (câbles longs).
 - La portée est de 2 à 3 cm : présentez le badge à plat, au centre de l'antenne. Éloignez l'antenne de toute surface métallique.
 
 ## Installation
